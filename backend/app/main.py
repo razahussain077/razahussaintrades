@@ -66,6 +66,7 @@ async def startup_event():
     asyncio.create_task(_signal_monitor_loop())
     asyncio.create_task(_ml_retrain_loop())
     asyncio.create_task(_funding_rate_refresh_loop())
+    asyncio.create_task(_events_refresh_loop())
     logger.info("API startup complete — all background tasks started")
 
 
@@ -192,6 +193,20 @@ async def _funding_rate_refresh_loop():
                     pass
         except Exception as e:
             logger.warning(f"Funding rate refresh error: {e}")
+        await asyncio.sleep(3600)  # 1 hour
+
+
+async def _events_refresh_loop():
+    """Refresh economic events cache every 1 hour."""
+    from app.engines.news_engine import news_engine
+
+    await asyncio.sleep(60)  # Initial delay
+    while True:
+        try:
+            news_engine.refresh_events()
+            logger.info("Events cache refreshed")
+        except Exception as e:
+            logger.warning(f"Events refresh loop error: {e}")
         await asyncio.sleep(3600)  # 1 hour
 
 

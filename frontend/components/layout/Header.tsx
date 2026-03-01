@@ -24,7 +24,13 @@ export function Header() {
   const btcPrice = prices['BTC'] ?? prices['BTCUSDT'] ?? null
   const marketOverview =
     marketData && typeof marketData === 'object' && !Array.isArray(marketData)
-      ? (marketData as Record<string, unknown>)
+      ? (() => {
+          const msg = marketData as Record<string, unknown>
+          const d = msg.data
+          return d && typeof d === 'object' && !Array.isArray(d)
+            ? (d as Record<string, unknown>)
+            : msg
+        })()
       : null
 
   useEffect(() => {

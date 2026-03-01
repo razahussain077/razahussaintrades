@@ -178,5 +178,11 @@ class NewsEngine:
     def get_next_event(self) -> Optional[Dict]:
         return get_next_event()
 
+    def refresh_events(self) -> None:
+        """Force-refresh the events cache."""
+        global _cached_events, _last_fetch
+        _cached_events = _generate_upcoming_events()
+        _last_fetch = datetime.now(timezone.utc)
+
 
 news_engine = NewsEngine()

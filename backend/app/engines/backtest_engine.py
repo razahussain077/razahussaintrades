@@ -58,7 +58,7 @@ def _simulate_trade_outcome(
         else:  # SHORT
             if high >= stop_loss:
                 pnl_pct = (entry_price - stop_loss) / entry_price * 100
-                return {"result": "SL", "exit_price": stop_loss, "pnl_pct": round(-abs(pnl_pct if False else (entry_price - stop_loss) / entry_price * 100), 3), "bars_held": i + 1}
+                return {"result": "SL", "exit_price": stop_loss, "pnl_pct": round(pnl_pct, 3), "bars_held": i + 1}
             if low <= tp3:
                 pnl_pct = (entry_price - tp3) / entry_price * 100
                 return {"result": "TP3", "exit_price": tp3, "pnl_pct": round(pnl_pct, 3), "bars_held": i + 1}
