@@ -8,12 +8,20 @@ import {
   Wallet,
   Settings,
   BarChart2,
+  History,
+  FlaskConical,
+  Shield,
+  Calendar,
 } from 'lucide-react'
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: Home },
   { href: '/signals', label: 'Signals', icon: TrendingUp },
   { href: '/portfolio', label: 'Portfolio', icon: Wallet },
+  { href: '/history', label: 'History & P&L', icon: History },
+  { href: '/backtest', label: 'Backtesting', icon: FlaskConical },
+  { href: '/risk', label: 'Risk Manager', icon: Shield },
+  { href: '/events', label: 'Economic Calendar', icon: Calendar },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
@@ -59,7 +67,7 @@ export function Sidebar() {
         {/* Footer */}
         <div className="px-5 py-4 border-t border-gray-100">
           <p className="text-xs text-gray-400">© {new Date().getFullYear()} SMC Bot</p>
-          <p className="text-xs text-gray-400 mt-0.5">v1.0.0</p>
+          <p className="text-xs text-gray-400 mt-0.5">v2.0.0</p>
         </div>
       </aside>
 

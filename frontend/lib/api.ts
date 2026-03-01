@@ -6,6 +6,11 @@ import type {
   PortfolioSettings,
   RiskCalculation,
   Candle,
+  FundingRateData,
+  MLStats,
+  BacktestResult,
+  EconomicEvent,
+  SignalStats,
 } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -90,4 +95,105 @@ export async function takeSignal(signalId: string): Promise<void> {
   await apiFetch<void>(`/api/signals/${encodeURIComponent(signalId)}/take`, {
     method: 'POST',
   })
+}
+
+// ─── Phase 3 API Functions ───────────────────────────────────────────────────
+
+export async function fetchFundingRate(symbol: string): Promise<FundingRateData> {
+  return apiFetch<FundingRateData>(`/api/funding-rate/${encodeURIComponent(symbol)}`)
+}
+
+export async function fetchMLStats(): Promise<MLStats> {
+  return apiFetch<MLStats>('/api/ml/stats')
+}
+
+export async function fetchActiveSignalsLive(): Promise<{ signals: Signal[]; count: number }> {
+  return apiFetch<{ signals: Signal[]; count: number }>('/api/signals/active')
+}
+
+export async function runBacktest(params: {
+  symbol: string
+  timeframe: string
+  days: number
+}): Promise<BacktestResult> {
+  return apiFetch<BacktestResult>('/api/backtest/run', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function fetchUpcomingEvents(daysAhead: number = 7): Promise<{
+  events: EconomicEvent[]
+  next_event: EconomicEvent | null
+  active_warnings: string[]
+  has_active_warnings: boolean
+}> {
+  return apiFetch(`/api/events/upcoming?days_ahead=${daysAhead}`)
+}
+
+export async function fetchSignalHistory(params: {
+  limit?: number
+  coin?: string
+  signal_type?: string
+}): Promise<{ signals: Signal[]; count: number; page: number }> {
+  const query = new URLSearchParams()
+  if (params.limit) query.set('limit', String(params.limit))
+  if (params.coin) query.set('coin', params.coin)
+  if (params.signal_type) query.set('signal_type', params.signal_type)
+  const qs = query.toString()
+  return apiFetch(`/api/signals/history${qs ? `?${qs}` : ''}`)
+}
+
+export async function fetchSignalStats(): Promise<SignalStats> {
+  return apiFetch<SignalStats>('/api/signals/stats')
+}
+
+export interface PositionSizeParams {
+  balance: number
+  risk_pct: number
+  entry_price: number
+  stop_loss_price: number
+  confidence_score?: number
+  signal_type?: 'LONG' | 'SHORT'
+}
+
+export async function fetchPositionSize(params: PositionSizeParams): Promise<Record<string, unknown>> {
+  const query = new URLSearchParams({
+    balance: String(params.balance),
+    risk_pct: String(params.risk_pct),
+    entry_price: String(params.entry_price),
+    stop_loss_price: String(params.stop_loss_price),
+    confidence_score: String(params.confidence_score ?? 70),
+    signal_type: params.signal_type ?? 'LONG',
+  })
+  return apiFetch(`/api/risk/position-size?${query.toString()}`)
+}
+
+export async function fetchPortfolioExposure(): Promise<Record<string, unknown>> {
+  return apiFetch('/api/risk/portfolio')
+}
+
+export interface RiskSettings {
+  balance?: number
+  risk_pct?: number
+  max_trades?: number
+}
+
+export async function fetchRiskSettings(): Promise<RiskSettings> {
+  return apiFetch<RiskSettings>('/api/risk/settings')
+}
+
+export async function updateRiskSettings(settings: RiskSettings): Promise<{ message: string; settings: RiskSettings }> {
+  return apiFetch('/api/risk/settings', {
+    method: 'POST',
+    body: JSON.stringify(settings),
+  })
+}
+
+export async function fetchMarketRegime(symbol: string): Promise<Record<string, unknown>> {
+  return apiFetch(`/api/regime/${encodeURIComponent(symbol)}`)
+}
+
+export async function fetchLiquidationHeatmap(symbol: string): Promise<Record<string, unknown>> {
+  return apiFetch(`/api/liquidation-heatmap/${encodeURIComponent(symbol)}`)
 }

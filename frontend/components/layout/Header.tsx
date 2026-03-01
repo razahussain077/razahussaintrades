@@ -8,6 +8,7 @@ import { WS_MARKET_URL } from '@/lib/api'
 import { formatPrice, formatMarketCap } from '@/lib/utils'
 import { Wifi, WifiOff } from 'lucide-react'
 import { KillZoneBar } from './KillZoneBar'
+import { FundingRateBadge } from '@/components/phase3/FundingRateBadge'
 
 export function Header() {
   const [pktTime, setPktTime] = useState('')
@@ -54,6 +55,7 @@ export function Header() {
             <div className="hidden sm:flex items-center gap-1.5">
               <span className="text-gray-500 text-xs font-medium">BTC</span>
               <span className="font-semibold text-gray-900">{formatPrice(btcPrice)}</span>
+              <FundingRateBadge symbol="BTCUSDT" compact />
             </div>
           )}
           {marketOverview && typeof marketOverview.total_market_cap === 'number' && (
