@@ -36,11 +36,15 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function fetchCoins(): Promise<CoinData[]> {
-  return apiFetch<CoinData[]>('/api/coins')
+  const res = await apiFetch<{ coins: CoinData[]; count: number } | CoinData[]>('/api/coins')
+  if (Array.isArray(res)) return res
+  return res.coins ?? []
 }
 
 export async function fetchSignals(): Promise<Signal[]> {
-  return apiFetch<Signal[]>('/api/signals')
+  const res = await apiFetch<{ signals: Signal[]; count: number } | Signal[]>('/api/signals')
+  if (Array.isArray(res)) return res
+  return res.signals ?? []
 }
 
 export async function fetchMarketOverview(): Promise<MarketOverview> {
