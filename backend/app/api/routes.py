@@ -12,6 +12,12 @@ from app.exchanges.binance_client import binance_client
 from app.exchanges.coingecko_client import coingecko_client
 from app.analysis.ict_engine import get_kill_zones
 from app.analysis.correlation_engine import calculate_btc_correlation, build_correlation_matrix, get_market_cap_category
+from app.analysis.smc_engine import smc_engine
+from app.analysis.ict_engine import ict_engine
+from app.analysis.liquidity_engine import liquidity_engine
+from app.analysis.wyckoff_engine import wyckoff_engine
+from app.analysis.whale_tracker import whale_tracker
+from app.analysis.volatility_engine import volatility_engine, calculate_atr_percentage
 from app.signals.signal_generator import signal_generator
 from app.signals.models import (
     Signal, SignalFilter, PortfolioSettings, RiskCalculationRequest, RiskCalculationResponse
@@ -19,7 +25,6 @@ from app.signals.models import (
 from app.risk.position_sizer import calculate_position_value
 from app.risk.leverage_calculator import calculate_safe_leverage, dynamic_leverage
 from app.risk.anti_liquidation import get_liquidation_price, check_liquidation_safety, validate_trade
-from app.analysis.volatility_engine import calculate_atr_percentage
 from app.database.models import (
     save_signal, get_signals, get_signal_by_id,
     mark_signal_taken, save_portfolio_settings, get_portfolio_settings,
@@ -39,15 +44,25 @@ async def list_coins():
     """Return all top 50 coins with aggregated price data."""
     try:
         coins_data = await aggregator.get_all_top_coins_data()
-        # Add signal counts from DB
+        # Add signal status and confidence from DB
         active_signals = await get_signals(is_active=True, limit=200)
-        signal_map: Dict[str, int] = {}
+        signal_map: Dict[str, Dict] = {}
         for sig in active_signals:
             symbol = sig.get("coin", "")
-            signal_map[symbol] = signal_map.get(symbol, 0) + 1
+            if symbol not in signal_map or sig.get("confidence_score", 0) > signal_map[symbol].get("confidence_score", 0):
+                signal_map[symbol] = sig
 
         for coin in coins_data:
-            coin["active_signals"] = signal_map.get(coin["symbol"], 0)
+            sym = coin["symbol"]
+            best_sig = signal_map.get(sym)
+            if best_sig:
+                coin["signal_status"] = best_sig.get("signal_type", "WAIT")
+                coin["confidence_score"] = round(best_sig.get("confidence_score", 0), 1)
+                coin["active_signals"] = sum(1 for s in active_signals if s.get("coin") == sym)
+            else:
+                coin["signal_status"] = "WAIT"
+                coin["confidence_score"] = 0
+                coin["active_signals"] = 0
 
         return {"coins": coins_data, "count": len(coins_data)}
     except Exception as e:
@@ -188,7 +203,64 @@ async def market_overview():
 @router.get("/market/kill-zones", summary="Current ICT kill zone info")
 async def kill_zones_info():
     """Return current and upcoming ICT kill zones with PKT times."""
-    return get_kill_zones()
+    return format_kill_zones()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KILL ZONES (alias for frontend compatibility)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/killzones", summary="Current ICT kill zone info (alias)")
+async def kill_zones_alias():
+    """Return current and upcoming ICT kill zones with PKT times."""
+    return format_kill_zones()
+
+
+def format_kill_zones() -> Dict:
+    """Return kill zone data in the format expected by the frontend."""
+    from datetime import datetime, timezone
+    import pytz
+
+    raw = get_kill_zones()
+    PKT = pytz.timezone(settings.PKT_TIMEZONE)
+    now_pkt = datetime.now(timezone.utc).astimezone(PKT)
+
+    kill_zone_sessions = [
+        {"name": "Asian", "utc_start": 0, "utc_end": 9, "pkt_start": 5, "pkt_end": 14},
+        {"name": "London", "utc_start": 8, "utc_end": 12, "pkt_start": 13, "pkt_end": 17},
+        {"name": "New York", "utc_start": 13, "utc_end": 18, "pkt_start": 18, "pkt_end": 23},
+        {"name": "London Close", "utc_start": 17, "utc_end": 19, "pkt_start": 22, "pkt_end": 24},
+    ]
+
+    hour_utc = datetime.now(timezone.utc).hour
+    active_name = raw.get("active_session", "Off Hours")
+
+    zones = []
+    for s in kill_zone_sessions:
+        is_active = s["utc_start"] <= hour_utc < s["utc_end"]
+        end_hour = s["pkt_end"] % 24
+        # Minutes until next start (approximate)
+        minutes_until = None
+        if not is_active:
+            diff_h = (s["utc_start"] - hour_utc) % 24
+            minutes_until = diff_h * 60
+
+        zones.append({
+            "name": s["name"],
+            "is_active": is_active,
+            "start_pkt": f"{s['pkt_start']:02d}:00",
+            "end_pkt": f"{end_hour:02d}:00",
+            "minutes_until_next": minutes_until,
+        })
+
+    return {
+        "current_time_pkt": now_pkt.strftime("%H:%M"),
+        "active_session": active_name if active_name != "Off Hours" else None,
+        "zones": zones,
+        # legacy fields
+        "current_pkt_time": raw.get("current_pkt_time"),
+        "is_kill_zone": raw.get("is_kill_zone", False),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -337,4 +409,97 @@ async def liquidation_heatmap(
         raise
     except Exception as e:
         logger.error(f"liquidation_heatmap error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CANDLES
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Map frontend timeframe labels to Binance interval strings
+BINANCE_INTERVAL_MAP: Dict[str, str] = {
+    "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+    "1h": "1h", "1H": "1h", "2h": "2h", "4h": "4h", "4H": "4h",
+    "6h": "6h", "8h": "8h", "12h": "12h",
+    "1d": "1d", "1D": "1d", "3d": "3d",
+    "1w": "1w", "1W": "1w", "1M": "1M",
+}
+
+
+@router.get("/candles/{symbol}", summary="Get OHLCV candle data for a symbol")
+async def get_candles(
+    symbol: str,
+    timeframe: str = Query("1H", description="Timeframe: 1m, 5m, 15m, 30m, 1H, 4H, 1D, 1W"),
+    limit: int = Query(200, ge=10, le=1000),
+):
+    """Return candle data formatted for TradingView lightweight-charts."""
+    symbol = symbol.upper()
+    interval = BINANCE_INTERVAL_MAP.get(timeframe, "1h")
+    try:
+        candles = await aggregator.get_best_candles(symbol, interval, limit)
+        if not candles:
+            raise HTTPException(status_code=404, detail=f"No candle data for {symbol}")
+        # Convert to TradingView format (time in seconds)
+        result = [
+            {
+                "time": int(c["timestamp"]) // 1000,
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "volume": c.get("volume", 0),
+            }
+            for c in candles
+        ]
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_candles error for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANALYSIS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/analysis/{symbol}", summary="Run full SMC/ICT analysis on a symbol")
+async def analyze_symbol(
+    symbol: str,
+    timeframe: str = Query("1H"),
+    limit: int = Query(100, ge=20, le=500),
+):
+    """Run all analysis engines for a symbol and return results."""
+    symbol = symbol.upper()
+    interval = BINANCE_INTERVAL_MAP.get(timeframe, "1h")
+    try:
+        candles = await aggregator.get_best_candles(symbol, interval, limit)
+        if len(candles) < 20:
+            raise HTTPException(status_code=404, detail=f"Insufficient data for {symbol}")
+
+        order_book = await binance_client.get_order_book(symbol, 20)
+
+        smc_result = smc_engine.analyze(candles)
+        ict_result = ict_engine.analyze(candles)
+        liq_result = liquidity_engine.analyze(candles)
+        wyckoff_result = wyckoff_engine.analyze(candles)
+        whale_result = whale_tracker.analyze(candles, order_book)
+        vol_result = volatility_engine.analyze(candles)
+
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "candle_count": len(candles),
+            "smc": smc_result,
+            "ict": ict_result,
+            "liquidity": liq_result,
+            "wyckoff": wyckoff_result,
+            "whale": whale_result,
+            "volatility": vol_result,
+            "kill_zones": get_kill_zones(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"analyze_symbol error for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

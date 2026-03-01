@@ -10,6 +10,8 @@ from app.websocket_manager import manager
 from app.api.routes import router
 from app.api.websocket_routes import ws_router
 from app.exchanges.binance_client import binance_client
+from app.signals.signal_generator import signal_generator
+from app.database.models import save_signal
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
@@ -60,6 +62,8 @@ async def startup_event():
 
     # Start price refresh background loop
     asyncio.create_task(_price_refresh_loop())
+    # Start signal scan background loop
+    asyncio.create_task(_signal_scan_loop())
     logger.info("API startup complete")
 
 
@@ -86,6 +90,28 @@ async def _price_refresh_loop():
         except Exception as e:
             logger.warning(f"Price refresh loop error: {e}")
         await asyncio.sleep(settings.PRICE_CACHE_TTL)
+
+
+_SIGNAL_SCAN_INTERVAL_SECONDS = 300  # scan all coins every 5 minutes
+
+
+async def _signal_scan_loop():
+    """Background loop: scan all top coins for signals every 5 minutes."""
+    # Initial delay to let the app fully start
+    await asyncio.sleep(30)
+    while True:
+        try:
+            logger.info("Starting background signal scan for all coins...")
+            signals = await signal_generator.scan_all()
+            for sig in signals:
+                sig_dict = sig.model_dump()
+                sig_dict["created_at"] = sig_dict["created_at"].isoformat()
+                await save_signal(sig_dict)
+                await manager.push_signal(sig_dict)
+            logger.info(f"Signal scan complete: {len(signals)} signals generated")
+        except Exception as e:
+            logger.error(f"Signal scan loop error: {e}")
+        await asyncio.sleep(_SIGNAL_SCAN_INTERVAL_SECONDS)
 
 
 @app.get("/health", tags=["Health"])

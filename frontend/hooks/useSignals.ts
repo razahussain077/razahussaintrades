@@ -35,8 +35,18 @@ export function useSignals(): {
     if (Array.isArray(data)) {
       setSignals(data as Signal[])
     } else if (typeof data === 'object' && data !== null) {
-      const msg = data as { type?: string; signal?: Signal; signals?: Signal[] }
-      if (msg.type === 'new_signal' && msg.signal) {
+      const msg = data as { type?: string; data?: Signal | Signal[]; signal?: Signal; signals?: Signal[] }
+      if (msg.type === 'initial_signals' && Array.isArray(msg.data)) {
+        setSignals(msg.data as Signal[])
+      } else if (msg.type === 'signal' && msg.data && !Array.isArray(msg.data)) {
+        const sig = msg.data as Signal
+        setSignals((prev) => {
+          const exists = prev.find((s) => s.id === sig.id)
+          return exists ? prev : [sig, ...prev]
+        })
+      } else if (msg.type === 'signals_update' && Array.isArray(msg.data)) {
+        setSignals(msg.data as Signal[])
+      } else if (msg.type === 'new_signal' && msg.signal) {
         setSignals((prev) => {
           const exists = prev.find((s) => s.id === msg.signal!.id)
           return exists ? prev : [msg.signal!, ...prev]

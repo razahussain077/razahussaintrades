@@ -98,7 +98,7 @@ class ExchangeAggregator:
         return result
 
     async def get_all_top_coins_data(self) -> List[Dict]:
-        """Return aggregated ticker data for all top coins."""
+        """Return aggregated ticker data for all top coins with CoinGecko metadata."""
         try:
             all_binance = await binance_client.get_ticker_24h()
             binance_map: Dict[str, Dict] = {}
@@ -112,9 +112,35 @@ class ExchangeAggregator:
             all_okx = await okx_client.get_tickers()
             okx_map: Dict[str, Dict] = {t["symbol"]: t for t in all_okx}
 
+            # Fetch CoinGecko market data for name/image/market_cap
+            cg_markets = await coingecko_client.get_coins_markets(per_page=100)
+            # Build map: USDT-stripped symbol -> cg data
+            cg_map: Dict[str, Dict] = {}
+            for coin in cg_markets:
+                sym = coin.get("symbol", "").upper()
+                cg_map[sym] = coin
+                # Also index by XXXUSDT key
+                cg_map[f"{sym}USDT"] = coin
+
             results = []
             for symbol in settings.TOP_50_COINS:
-                entry: Dict = {"symbol": symbol, "exchange": "binance", "sources": []}
+                entry: Dict = {
+                    "symbol": symbol,
+                    "exchange": "binance",
+                    "sources": [],
+                    "name": symbol.replace("USDT", ""),
+                    "image": None,
+                    "market_cap": 0,
+                    "market_cap_category": "mid_cap",
+                    "signal_status": "WAIT",
+                    "confidence_score": 0,
+                    "volatility_score": 0,
+                    "price_change_24h": 0.0,
+                    "price_change_pct_24h": 0.0,
+                    "volume_24h": 0.0,
+                    "high_24h": 0.0,
+                    "low_24h": 0.0,
+                }
                 prices = []
 
                 if symbol in binance_map:
@@ -122,7 +148,10 @@ class ExchangeAggregator:
                     bp = float(b.get("lastPrice", 0))
                     if bp > 0:
                         prices.append(bp)
-                        entry["price_change_pct_24h"] = float(b.get("priceChangePercent", 0))
+                        pct = float(b.get("priceChangePercent", 0))
+                        price_chg = float(b.get("priceChange", 0))
+                        entry["price_change_pct_24h"] = pct
+                        entry["price_change_24h"] = price_chg
                         entry["volume_24h"] = float(b.get("quoteVolume", 0))
                         entry["high_24h"] = float(b.get("highPrice", 0))
                         entry["low_24h"] = float(b.get("lowPrice", 0))
@@ -140,10 +169,28 @@ class ExchangeAggregator:
                         prices.append(okx_p)
                         entry["sources"].append("okx")
 
-                if prices:
-                    entry["price"] = sum(prices) / len(prices)
-                    entry["exchange_count"] = len(prices)
-                    results.append(entry)
+                if not prices:
+                    continue
+
+                entry["price"] = sum(prices) / len(prices)
+                entry["exchange_count"] = len(prices)
+
+                # Enrich with CoinGecko data
+                cg = cg_map.get(symbol) or cg_map.get(symbol.replace("USDT", ""))
+                if cg:
+                    entry["name"] = cg.get("name", entry["name"])
+                    entry["image"] = cg.get("image")
+                    entry["market_cap"] = cg.get("market_cap", 0) or 0
+
+                    mc = entry["market_cap"]
+                    if mc >= 10_000_000_000:
+                        entry["market_cap_category"] = "large_cap"
+                    elif mc >= 1_000_000_000:
+                        entry["market_cap_category"] = "mid_cap"
+                    else:
+                        entry["market_cap_category"] = "small_cap"
+
+                results.append(entry)
 
             return results
         except Exception as e:
@@ -182,16 +229,29 @@ class ExchangeAggregator:
         btc_funding = await binance_client.get_funding_rate("BTCUSDT")
         eth_funding = await binance_client.get_funding_rate("ETHUSDT")
 
+        total_market_cap = global_data.get("total_market_cap_usd", 0)
+        total_volume = global_data.get("total_volume_usd", 0)
+        market_change = global_data.get("market_cap_change_pct_24h", 0)
+        fear_score = fear_greed.get("score", 50)
+
         return {
-            "total_market_cap_usd": global_data.get("total_market_cap_usd", 0),
-            "total_volume_usd": global_data.get("total_volume_usd", 0),
+            # Frontend-compatible field names
+            "total_market_cap": total_market_cap,
+            "total_volume_24h": total_volume,
             "btc_dominance": global_data.get("btc_dominance", 0),
             "eth_dominance": global_data.get("eth_dominance", 0),
-            "market_cap_change_pct_24h": global_data.get("market_cap_change_pct_24h", 0),
-            "fear_greed_score": fear_greed.get("score", 50),
+            "market_change_24h": market_change,
+            "fear_greed_index": fear_score,
             "fear_greed_label": fear_greed.get("label", "Neutral"),
+            "active_coins": global_data.get("active_cryptocurrencies", 0),
+            # Extra fields
             "btc_funding_rate": btc_funding.get("funding_rate", 0),
             "eth_funding_rate": eth_funding.get("funding_rate", 0),
+            # Legacy aliases
+            "total_market_cap_usd": total_market_cap,
+            "total_volume_usd": total_volume,
+            "market_cap_change_pct_24h": market_change,
+            "fear_greed_score": fear_score,
             "active_cryptocurrencies": global_data.get("active_cryptocurrencies", 0),
         }
 
