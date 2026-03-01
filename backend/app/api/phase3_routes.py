@@ -59,8 +59,8 @@ async def get_liquidation_heatmap(symbol: str):
 async def get_funding_rate(symbol: str):
     """
     Returns current funding rate, history, and signal modifier.
-    Positive rate = longs paying = bearish signal boost.
-    Negative rate = shorts paying = bullish signal boost.
+    Positive rate = longs paying shorts = SHORT confidence boost (market over-leveraged LONG).
+    Negative rate = shorts paying longs = LONG confidence boost (market over-leveraged SHORT).
     """
     symbol = symbol.upper()
     result = await funding_engine.get_funding_data(symbol)
