@@ -8,11 +8,19 @@ import {
   Wallet,
   Settings,
   BarChart2,
+  History,
+  FlaskConical,
+  Shield,
+  Calendar,
 } from 'lucide-react'
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: Home },
   { href: '/signals', label: 'Signals', icon: TrendingUp },
+  { href: '/history', label: 'History', icon: History },
+  { href: '/backtest', label: 'Backtest', icon: FlaskConical },
+  { href: '/risk', label: 'Risk Manager', icon: Shield },
+  { href: '/events', label: 'Events', icon: Calendar },
   { href: '/portfolio', label: 'Portfolio', icon: Wallet },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -31,12 +39,12 @@ export function Sidebar() {
           </div>
           <div>
             <p className="text-sm font-bold text-gray-900 leading-none">SMC Bot</p>
-            <p className="text-xs text-gray-500 mt-0.5">Signal Dashboard</p>
+            <p className="text-xs text-gray-500 mt-0.5">Market Maker Edition</p>
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = href === '/' ? pathname === '/' : pathname.startsWith(href)
             return (
@@ -59,13 +67,13 @@ export function Sidebar() {
         {/* Footer */}
         <div className="px-5 py-4 border-t border-gray-100">
           <p className="text-xs text-gray-400">© {new Date().getFullYear()} SMC Bot</p>
-          <p className="text-xs text-gray-400 mt-0.5">v1.0.0</p>
+          <p className="text-xs text-gray-400 mt-0.5">v2.0.0 — Phase 3</p>
         </div>
       </aside>
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 flex">
-        {navItems.map(({ href, label, icon: Icon }) => {
+        {navItems.slice(0, 5).map(({ href, label, icon: Icon }) => {
           const active = href === '/' ? pathname === '/' : pathname.startsWith(href)
           return (
             <Link
