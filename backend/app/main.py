@@ -9,6 +9,7 @@ from app.database.db import init_db
 from app.websocket_manager import manager
 from app.api.routes import router
 from app.api.websocket_routes import ws_router
+from app.api.phase3_routes import phase3_router
 from app.exchanges.binance_client import binance_client
 from app.signals.signal_generator import signal_generator
 from app.database.models import save_signal
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Crypto Trading Signal Bot API",
     description="Smart Money Concepts + ICT methodology trading signal bot with real-time WebSocket support",
-    version="1.0.0",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -39,12 +40,13 @@ app.add_middleware(
 # Include routers
 app.include_router(router, prefix="/api", tags=["API"])
 app.include_router(ws_router, tags=["WebSocket"])
+app.include_router(phase3_router, prefix="/api", tags=["Phase 3"])
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize DB, start background tasks on app startup."""
-    logger.info("Starting Crypto Trading Signal Bot API...")
+    logger.info("Starting Crypto Trading Signal Bot API v2.0 (Phase 3)...")
 
     # Initialize database
     try:
@@ -60,11 +62,13 @@ async def startup_event():
     except Exception as e:
         logger.error(f"WS manager start failed: {e}")
 
-    # Start price refresh background loop
+    # Start background loops
     asyncio.create_task(_price_refresh_loop())
-    # Start signal scan background loop
     asyncio.create_task(_signal_scan_loop())
-    logger.info("API startup complete")
+    asyncio.create_task(_signal_monitor_loop())
+    asyncio.create_task(_ml_retrain_loop())
+    asyncio.create_task(_funding_rate_refresh_loop())
+    logger.info("API startup complete — all background tasks started")
 
 
 @app.on_event("shutdown")
@@ -92,16 +96,12 @@ async def _price_refresh_loop():
         await asyncio.sleep(settings.PRICE_CACHE_TTL)
 
 
-_SIGNAL_SCAN_INTERVAL_SECONDS = 300  # scan all coins every 5 minutes
-
-
 async def _signal_scan_loop():
-    """Background loop: scan all top coins for signals every 5 minutes."""
-    # Initial delay to let the app fully start
-    await asyncio.sleep(30)
+    """Scan all coins for signals every 5 minutes."""
+    await asyncio.sleep(30)  # Initial delay
     while True:
         try:
-            logger.info("Starting background signal scan for all coins...")
+            logger.info("Signal scan loop: scanning all coins...")
             signals = await signal_generator.scan_all()
             for sig in signals:
                 sig_dict = sig.model_dump()
@@ -110,8 +110,89 @@ async def _signal_scan_loop():
                 await manager.push_signal(sig_dict)
             logger.info(f"Signal scan complete: {len(signals)} signals generated")
         except Exception as e:
-            logger.error(f"Signal scan loop error: {e}")
-        await asyncio.sleep(_SIGNAL_SCAN_INTERVAL_SECONDS)
+            logger.warning(f"Signal scan loop error: {e}")
+        await asyncio.sleep(300)  # 5 minutes
+
+
+async def _signal_monitor_loop():
+    """Monitor active signal prices every 1 minute to detect TP/SL hits."""
+    from app.database.models import get_signals, save_signal_history
+
+    await asyncio.sleep(60)  # Initial delay
+    while True:
+        try:
+            active_signals = await get_signals(is_active=True, limit=100)
+            for sig in active_signals:
+                symbol = sig.get("coin", "")
+                if not symbol:
+                    continue
+                try:
+                    current_price = await binance_client.get_price(symbol)
+                    if current_price <= 0:
+                        continue
+
+                    signal_type = sig.get("signal_type", "LONG")
+                    entry = (sig.get("entry_low", 0) + sig.get("entry_high", 0)) / 2
+                    sl = sig.get("stop_loss", 0)
+                    tp1 = sig.get("take_profit_1", 0)
+
+                    hit_result = None
+                    if signal_type == "LONG":
+                        if current_price <= sl:
+                            hit_result = "LOSS"
+                        elif current_price >= tp1:
+                            hit_result = "WIN"
+                    else:
+                        if current_price >= sl:
+                            hit_result = "LOSS"
+                        elif current_price <= tp1:
+                            hit_result = "WIN"
+
+                    if hit_result:
+                        pnl = tp1 - entry if hit_result == "WIN" else sl - entry
+                        await save_signal_history({
+                            "signal_id": sig["id"],
+                            "result": hit_result,
+                            "pnl": round(pnl, 8),
+                        })
+                        logger.info(f"Signal {sig['id']} ({symbol}) auto-closed: {hit_result}")
+                except Exception as e:
+                    logger.debug(f"Signal monitor error for {symbol}: {e}")
+        except Exception as e:
+            logger.warning(f"Signal monitor loop error: {e}")
+        await asyncio.sleep(60)  # 1 minute
+
+
+async def _ml_retrain_loop():
+    """Retrain ML model every 24 hours."""
+    from app.engines.ml_engine import ml_engine
+
+    await asyncio.sleep(3600)  # Wait 1 hour before first retrain attempt
+    while True:
+        try:
+            logger.info("ML retrain loop: attempting model retrain...")
+            ml_engine.retrain()
+        except Exception as e:
+            logger.warning(f"ML retrain loop error: {e}")
+        await asyncio.sleep(86400)  # 24 hours
+
+
+async def _funding_rate_refresh_loop():
+    """Refresh funding rates for top coins every 1 hour."""
+    from app.engines.funding_engine import funding_engine
+
+    await asyncio.sleep(120)  # Initial delay
+    while True:
+        try:
+            for symbol in settings.TOP_50_COINS[:20]:  # Top 20 most active
+                try:
+                    await funding_engine.get_funding_data(symbol)
+                    await asyncio.sleep(0.2)  # Small delay between requests
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Funding rate refresh error: {e}")
+        await asyncio.sleep(3600)  # 1 hour
 
 
 @app.get("/health", tags=["Health"])
@@ -120,15 +201,16 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "crypto-signal-bot",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "environment": settings.ENVIRONMENT,
+        "phase": "3",
     }
 
 
 @app.get("/", tags=["Root"])
 async def root():
     return {
-        "message": "Crypto Trading Signal Bot API",
+        "message": "Crypto Trading Signal Bot API v2.0 — Phase 3 Market Maker Edition",
         "docs": "/docs",
         "health": "/health",
     }
