@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 _cache: Dict[str, tuple] = {}
 _last_request_time: float = 0.0
-_REQUEST_INTERVAL = 2.5  # 30 req/min max; use 2.5s interval for safety margin
+_REQUEST_INTERVAL = 2.5  # ~24 req/min at this interval; CoinGecko free tier allows 30 req/min, 2.5s provides safety buffer
 
 
 def _get_cache(key: str) -> Optional[Any]:

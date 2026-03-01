@@ -31,7 +31,9 @@ class Settings(BaseSettings):
 
     # Risk defaults
     DEFAULT_RISK_PCT: float = 1.0
-    MAX_LEVERAGE: float = 20.0
+    # Cap leverage at 10x for safety; the anti-liquidation formula may recommend
+    # up to 20x in low-volatility markets, but 10x is a safer default ceiling.
+    MAX_LEVERAGE: float = 10.0
     MIN_CONFIDENCE_SCORE: float = 60.0
 
     TOP_50_COINS: List[str] = [

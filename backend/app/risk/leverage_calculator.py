@@ -9,7 +9,7 @@ def calculate_safe_leverage(
     """
     Calculate safe leverage based on distance to nearest liquidity zone.
     Formula: max_safe_leverage = (distance% * 100) / safety_margin
-    Recommended = max_safe_leverage * 0.5, capped at MAX_LEVERAGE (default 20x).
+    Recommended = max_safe_leverage * 0.5, capped at MAX_LEVERAGE (default 10x).
     """
     if nearest_liquidity_zone <= 0 or entry_price <= 0:
         return 1.0
@@ -27,7 +27,7 @@ def calculate_safe_leverage(
 def dynamic_leverage(
     atr_pct: float,
     confidence_score: float,
-    max_lev: float = 20.0,
+    max_lev: float = 10.0,
 ) -> float:
     """
     Adjust leverage based on volatility (ATR%) and signal confidence.
