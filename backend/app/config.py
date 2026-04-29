@@ -73,6 +73,42 @@ class Settings(BaseSettings):
     NOTIFICATIONS_ENABLED: bool = True
     DASHBOARD_URL: str = ""  # public URL used for inline-keyboard buttons
 
+    # ------------------------------------------------------------------
+    # Auto-execution (PR7) — DANGEROUS. Off by default, dry-run by default.
+    # ------------------------------------------------------------------
+    # Master kill: even if everything else is configured, no order is placed
+    # unless this is explicitly true.
+    AUTO_EXECUTION_ENABLED: bool = False
+    # When true the executor walks the full code path (sizing, formatting,
+    # idempotency) but never sends to the exchange — instead it returns a
+    # deterministic "dry-{signal_id}" order id. Stays true by default to
+    # protect users who flip ENABLED without realizing they hadn't set this.
+    AUTO_EXECUTION_DRY_RUN: bool = True
+    # Confidence floor for *automatic* placement (the manual /place endpoint
+    # uses the guardian's own min). Higher than the 60 confidence shown in
+    # cards, by design — auto-trading should be selective.
+    AUTO_EXECUTION_MIN_CONFIDENCE: float = 80.0
+    # Hard caps applied by the AccountGuardian. Override only if you really
+    # know what you're doing.
+    AUTO_EXECUTION_MAX_RISK_PCT: float = 0.005   # 0.5% per trade
+    AUTO_EXECUTION_MAX_LEVERAGE: float = 5.0
+    AUTO_EXECUTION_MAX_CONCURRENT: int = 3
+    AUTO_EXECUTION_DAILY_LOSS_LIMIT_PCT: float = 0.03
+    AUTO_EXECUTION_MIN_RR_NET: float = 1.5
+    # If we cannot read account equity (no creds, ccxt unreachable), fall back
+    # to this number for sizing math. Defaults to 0 so the guardian rejects.
+    AUTO_EXECUTION_FALLBACK_EQUITY_USD: float = 0.0
+    # Length of an arming window before auto-disarm, in minutes.
+    AUTO_EXECUTION_ARM_DURATION_MIN: int = 240   # 4 hours
+
+    # Exchange credentials (CCXT). Only consumed by app/execution/.
+    EXCHANGE_NAME: str = "binanceusdm"            # ccxt class name
+    EXCHANGE_API_KEY: str = ""
+    EXCHANGE_API_SECRET: str = ""
+    # Base32 TOTP secret used to arm auto-execution. NOT the same as your
+    # exchange's withdrawal-2FA secret.
+    EXECUTION_TOTP_SECRET: str = ""
+
     TOP_50_COINS: List[str] = [
         "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
         "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "TRXUSDT",

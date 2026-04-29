@@ -12,6 +12,7 @@ from app.api.websocket_routes import ws_router
 from app.api.phase3_routes import phase3_router
 from app.api.orderflow_routes import orderflow_router
 from app.api.notifications_routes import notifications_router
+from app.api.execution_routes import execution_router
 from app.exchanges.binance_client import binance_client
 from app.signals.signal_generator import signal_generator
 from app.database.models import save_signal
@@ -57,6 +58,7 @@ app.include_router(ws_router, tags=["WebSocket"])
 app.include_router(phase3_router, prefix="/api", tags=["Phase 3"])
 app.include_router(orderflow_router, prefix="/api", tags=["Order Flow"])
 app.include_router(notifications_router, tags=["Notifications"])
+app.include_router(execution_router, tags=["Execution"])
 
 
 @app.on_event("startup")
@@ -159,6 +161,36 @@ async def _signal_scan_loop():
                         await telegram_client.send_signal(sig_dict)
                     except Exception as e:
                         logger.warning("telegram push failed: %s", e)
+                    # Optional auto-execution. Off unless AUTO_EXECUTION_ENABLED
+                    # and the user has armed via TOTP. The executor itself
+                    # handles every gate (kill switch, caps, idempotency,
+                    # dry-run); we just hand it the signal and forget.
+                    if settings.AUTO_EXECUTION_ENABLED:
+                        try:
+                            from app.execution.ccxt_executor import (
+                                ccxt_executor, get_account_equity_usd,
+                            )
+                            equity = get_account_equity_usd()
+                            result = ccxt_executor.place_for_signal(
+                                sig_dict,
+                                equity_usd=equity,
+                                open_positions_count=0,
+                                today_pnl_usd=0.0,
+                            )
+                            if result.get("ok"):
+                                logger.info(
+                                    "auto-exec placed %s for signal %s "
+                                    "(dry_run=%s)",
+                                    result.get("order_id"), sig_dict.get("id"),
+                                    result.get("dry_run"),
+                                )
+                            else:
+                                logger.info(
+                                    "auto-exec skipped signal %s: %s",
+                                    sig_dict.get("id"), result.get("reason"),
+                                )
+                        except Exception as e:
+                            logger.warning("auto-exec failed: %s", e)
                 logger.info(f"Signal scan complete: {len(signals)} signals generated")
         except Exception as e:
             logger.warning(f"Signal scan loop error: {e}")
