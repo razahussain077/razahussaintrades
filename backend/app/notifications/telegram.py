@@ -50,7 +50,10 @@ def format_signal_card(signal: Dict) -> str:
     arrow = "🟢 LONG" if sig_type == "LONG" else "🔴 SHORT" if sig_type == "SHORT" else sig_type
     coin = signal.get("coin", "?")
     confidence = signal.get("confidence_score", 0)
-    leverage = signal.get("leverage", 0)
+    # Field-name compatibility: prefer the canonical Signal model fields
+    # (recommended_leverage / take_profit_N / risk_reward[_net]) but fall
+    # back to short aliases for tests / synthetic dicts that still use them.
+    leverage = signal.get("recommended_leverage") or signal.get("leverage", 0)
     setup = signal.get("setup_type", "—")
 
     entry_low = signal.get("entry_low")
@@ -61,16 +64,21 @@ def format_signal_card(signal: Dict) -> str:
         else "—"
     )
     sl = signal.get("stop_loss", "—")
-    tp1 = signal.get("tp1", "—")
-    tp2 = signal.get("tp2", "—")
-    tp3 = signal.get("tp3", "—")
+    tp1 = signal.get("take_profit_1") or signal.get("tp1", "—")
+    tp2 = signal.get("take_profit_2") or signal.get("tp2", "—")
+    tp3 = signal.get("take_profit_3") or signal.get("tp3", "—")
     def _fmt_num(x: Any) -> str:
         if isinstance(x, (int, float)):
             return f"{x:g}"
         return _esc(x) if x is not None else "—"
 
-    rr_gross = signal.get("rr_ratio") or signal.get("rr_gross") or "—"
-    rr_net = signal.get("rr_net") or rr_gross
+    rr_gross = (
+        signal.get("risk_reward")
+        or signal.get("rr_ratio")
+        or signal.get("rr_gross")
+        or "—"
+    )
+    rr_net = signal.get("risk_reward_net") or signal.get("rr_net") or rr_gross
 
     reasoning: List[str] = signal.get("reasoning") or []
     reasons_block = "\n".join(f"• {_esc(r)}" for r in reasoning[:6]) or "—"

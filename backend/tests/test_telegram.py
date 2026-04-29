@@ -85,6 +85,33 @@ class TestFormatSignalCard:
         assert "ETHUSDT" in body
         assert "—" in body  # missing entry/SL
 
+    def test_canonical_signal_model_field_names(self):
+        """Regression: signal_scan_loop dumps a Signal model where the keys
+        are `take_profit_1` / `recommended_leverage` / `risk_reward[_net]`.
+        The card must render those, not silently fall back to placeholders."""
+        body = tg.format_signal_card({
+            "id": "s1",
+            "coin": "BTCUSDT",
+            "signal_type": "LONG",
+            "confidence_score": 80,
+            "recommended_leverage": 7,
+            "setup_type": "OB Retest",
+            "entry_low": 50000.0, "entry_high": 50100.0,
+            "stop_loss": 49500.0,
+            "take_profit_1": 51000.0,
+            "take_profit_2": 52000.0,
+            "take_profit_3": 53000.0,
+            "risk_reward": 2.5,
+            "risk_reward_net": 2.0,
+            "reasoning": ["test"],
+        })
+        assert "7x" in body
+        assert "51000" in body
+        assert "52000" in body
+        assert "53000" in body
+        assert "gross 2.5" in body
+        assert "net 2" in body
+
 
 # ---------------------------------------------------------------------------
 # TelegramClient.send_text
