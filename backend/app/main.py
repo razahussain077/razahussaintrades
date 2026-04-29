@@ -11,6 +11,7 @@ from app.api.routes import router
 from app.api.websocket_routes import ws_router
 from app.api.phase3_routes import phase3_router
 from app.api.orderflow_routes import orderflow_router
+from app.api.notifications_routes import notifications_router
 from app.exchanges.binance_client import binance_client
 from app.signals.signal_generator import signal_generator
 from app.database.models import save_signal
@@ -55,6 +56,7 @@ app.include_router(router, prefix="/api", tags=["API"])
 app.include_router(ws_router, tags=["WebSocket"])
 app.include_router(phase3_router, prefix="/api", tags=["Phase 3"])
 app.include_router(orderflow_router, prefix="/api", tags=["Order Flow"])
+app.include_router(notifications_router, tags=["Notifications"])
 
 
 @app.on_event("startup")
@@ -110,6 +112,11 @@ async def shutdown_event():
         logger.warning(f"stream supervisor shutdown error: {e}")
     await manager.stop()
     await binance_client.close()
+    try:
+        from app.notifications import telegram_client
+        await telegram_client.aclose()
+    except Exception as e:
+        logger.warning(f"telegram shutdown error: {e}")
 
 
 async def _price_refresh_loop():
@@ -131,17 +138,28 @@ async def _price_refresh_loop():
 
 async def _signal_scan_loop():
     """Scan all coins for signals every 5 minutes."""
+    from app.notifications import is_kill_switch_active, telegram_client
     await asyncio.sleep(30)  # Initial delay
     while True:
         try:
-            logger.info("Signal scan loop: scanning all coins...")
-            signals = await signal_generator.scan_all()
-            for sig in signals:
-                sig_dict = sig.model_dump()
-                sig_dict["created_at"] = sig_dict["created_at"].isoformat()
-                await save_signal(sig_dict)
-                await manager.push_signal(sig_dict)
-            logger.info(f"Signal scan complete: {len(signals)} signals generated")
+            if is_kill_switch_active():
+                logger.warning("Signal scan loop: kill switch active — skipping cycle")
+            else:
+                logger.info("Signal scan loop: scanning all coins...")
+                signals = await signal_generator.scan_all()
+                for sig in signals:
+                    sig_dict = sig.model_dump()
+                    sig_dict["created_at"] = sig_dict["created_at"].isoformat()
+                    await save_signal(sig_dict)
+                    await manager.push_signal(sig_dict)
+                    # Best-effort Telegram push. The client is a no-op when
+                    # not configured / disabled, and gracefully handles HTTP
+                    # failures, so we never raise into the scan loop.
+                    try:
+                        await telegram_client.send_signal(sig_dict)
+                    except Exception as e:
+                        logger.warning("telegram push failed: %s", e)
+                logger.info(f"Signal scan complete: {len(signals)} signals generated")
         except Exception as e:
             logger.warning(f"Signal scan loop error: {e}")
         await asyncio.sleep(300)  # 5 minutes
