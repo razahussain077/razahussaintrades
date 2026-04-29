@@ -40,6 +40,10 @@ export interface Signal {
   recommended_leverage: number
   liquidation_price: number
   risk_reward: number
+  // Cost-adjusted R/R: gross R/R after deducting round-trip exchange fees
+  // and one expected funding period of cost. Always <= risk_reward.
+  risk_reward_net?: number
+  expected_round_trip_fee_pct?: number
   confidence_score: number
   setup_type: string
   reasoning: string[]

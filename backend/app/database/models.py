@@ -27,6 +27,7 @@ async def save_signal(signal_data: Dict) -> bool:
                     take_profit_1, take_profit_1_pct, take_profit_2, take_profit_2_pct,
                     take_profit_3, take_profit_3_pct,
                     recommended_leverage, liquidation_price, risk_reward,
+                    risk_reward_net, expected_round_trip_fee_pct,
                     confidence_score, setup_type, reasoning, invalidation,
                     kill_zone, created_at, is_active, taken, result
                 ) VALUES (
@@ -35,6 +36,7 @@ async def save_signal(signal_data: Dict) -> bool:
                     :take_profit_1, :take_profit_1_pct, :take_profit_2, :take_profit_2_pct,
                     :take_profit_3, :take_profit_3_pct,
                     :recommended_leverage, :liquidation_price, :risk_reward,
+                    :risk_reward_net, :expected_round_trip_fee_pct,
                     :confidence_score, :setup_type, :reasoning, :invalidation,
                     :kill_zone, :created_at, :is_active, :taken, :result
                 )
@@ -45,6 +47,8 @@ async def save_signal(signal_data: Dict) -> bool:
                     "is_active": 1 if signal_data.get("is_active", True) else 0,
                     "taken": 1 if signal_data.get("taken", False) else 0,
                     "result": signal_data.get("result"),
+                    "risk_reward_net": signal_data.get("risk_reward_net"),
+                    "expected_round_trip_fee_pct": signal_data.get("expected_round_trip_fee_pct"),
                 },
             )
             await db.commit()
