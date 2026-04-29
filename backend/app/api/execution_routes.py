@@ -27,8 +27,10 @@ from app.execution.account_guardian import account_guardian
 from app.execution.ccxt_executor import ccxt_executor, get_account_equity_usd
 from app.execution.state import (
     all_recorded_orders,
+    count_open_executed_positions,
     get_armed_state,
     set_armed,
+    today_realised_pnl_usd,
 )
 from app.execution.totp import verify_totp
 from app.notifications.kill_switch import is_kill_switch_active
@@ -131,6 +133,8 @@ async def execution_orders() -> dict:
 @execution_router.post("/place")
 async def execution_place(body: PlaceRequest) -> dict:
     """Manually trigger placement for a single signal id (must already exist)."""
+    import asyncio as _aio
+
     from app.database.models import get_signals  # local import to avoid cycle
 
     rows = await get_signals(limit=200, is_active=None)
@@ -139,16 +143,18 @@ async def execution_place(body: PlaceRequest) -> dict:
         raise HTTPException(status_code=404,
                             detail=f"signal {body.signal_id} not found")
 
-    equity = get_account_equity_usd()
-    open_count = 0  # TODO(PR8): query exchange for live open positions
-    today_pnl = 0.0  # TODO(PR8): aggregate today's realised PnL
+    # ccxt's fetch_balance is synchronous and may block several seconds, so
+    # we run it off-thread. open_positions_count and today_pnl_usd come from
+    # our own DB / state and are already async.
+    equity = await _aio.to_thread(get_account_equity_usd)
+    open_count = await count_open_executed_positions()
+    today_pnl = await today_realised_pnl_usd()
 
-    result = ccxt_executor.place_for_signal(
-        signal,
-        equity_usd=equity,
-        open_positions_count=open_count,
-        today_pnl_usd=today_pnl,
-        force_dry_run=body.force_dry_run,
+    # `place_for_signal` itself may issue blocking ccxt orders in non-dry-run
+    # mode; wrap to keep the event loop free.
+    result = await _aio.to_thread(
+        ccxt_executor.place_for_signal,
+        signal, equity, open_count, today_pnl, body.force_dry_run,
     )
     return result
 

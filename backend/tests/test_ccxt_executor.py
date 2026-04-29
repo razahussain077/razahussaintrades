@@ -122,6 +122,20 @@ class TestDryRun:
         assert purposes == ["ENTRY", "STOP_LOSS",
                             "TAKE_PROFIT_1", "TAKE_PROFIT_2", "TAKE_PROFIT_3"]
 
+    def test_dry_run_order_shape_matches_live_path(self, enabled, armed):
+        """The dry-run idempotency payload claims byte-identical shape with
+        live; this regression test pins the SL type to stop_market and asserts
+        all exit legs include reduceOnly=True."""
+        ex = CCXTExecutor()
+        r = ex.place_for_signal(_signal(), 10000, 0, 0.0)
+        orders = {o["purpose"]: o for o in r["orders"]}
+        assert orders["STOP_LOSS"]["type"] == "stop_market"
+        assert orders["STOP_LOSS"]["reduceOnly"] is True
+        for leg in ("TAKE_PROFIT_1", "TAKE_PROFIT_2", "TAKE_PROFIT_3"):
+            assert orders[leg]["reduceOnly"] is True
+        # Entry has no reduceOnly — it's opening, not closing.
+        assert "reduceOnly" not in orders["ENTRY"] or orders["ENTRY"].get("reduceOnly") is not True
+
     def test_dry_run_tp_split_quantities(self, enabled, armed):
         ex = CCXTExecutor()
         r = ex.place_for_signal(_signal(), 10000, 0, 0.0)

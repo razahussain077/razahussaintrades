@@ -204,17 +204,20 @@ class CCXTExecutor:
             "client_signal_id": plan.signal_id,
             "dry_run": dry_run,
         }
+        # Order shapes match `_place_real_bracket` exactly so the recorded
+        # idempotency payload is byte-identical between dry-run and live.
         return [
             {**common, "side": side_entry, "price": plan.entry_mid,
              "amount": q_total, "purpose": "ENTRY"},
-            {**common, "type": "stop", "side": side_exit, "stopPrice": plan.stop_loss,
-             "amount": q_total, "purpose": "STOP_LOSS"},
+            {**common, "type": "stop_market", "side": side_exit,
+             "stopPrice": plan.stop_loss, "price": None,
+             "amount": q_total, "reduceOnly": True, "purpose": "STOP_LOSS"},
             {**common, "side": side_exit, "price": plan.take_profit_1,
-             "amount": q1, "purpose": "TAKE_PROFIT_1"},
+             "amount": q1, "reduceOnly": True, "purpose": "TAKE_PROFIT_1"},
             {**common, "side": side_exit, "price": plan.take_profit_2,
-             "amount": q2, "purpose": "TAKE_PROFIT_2"},
+             "amount": q2, "reduceOnly": True, "purpose": "TAKE_PROFIT_2"},
             {**common, "side": side_exit, "price": plan.take_profit_3,
-             "amount": q3, "purpose": "TAKE_PROFIT_3"},
+             "amount": q3, "reduceOnly": True, "purpose": "TAKE_PROFIT_3"},
         ]
 
     def _place_real_bracket(self, plan: OrderPlan) -> tuple[str, List[Dict]]:

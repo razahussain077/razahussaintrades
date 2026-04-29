@@ -149,6 +149,32 @@ async def _signal_scan_loop():
             else:
                 logger.info("Signal scan loop: scanning all coins...")
                 signals = await signal_generator.scan_all()
+                # Hoist equity / position / PnL fetches OUT of the per-signal
+                # loop. The previous version called get_account_equity_usd()
+                # for every signal, which (a) blocks the asyncio event loop
+                # on each sync ccxt round-trip and (b) burns rate limit. Read
+                # them once per cycle and pass cached values down.
+                _exec_equity: float = 0.0
+                _exec_open_count: int = 0
+                _exec_today_pnl: float = 0.0
+                if settings.AUTO_EXECUTION_ENABLED and signals:
+                    try:
+                        from app.execution.ccxt_executor import (
+                            get_account_equity_usd,
+                        )
+                        from app.execution.state import (
+                            count_open_executed_positions,
+                            today_realised_pnl_usd,
+                        )
+                        # ccxt fetch_balance is synchronous; run it off-thread
+                        # so it can't stall the event loop.
+                        _exec_equity = await asyncio.to_thread(
+                            get_account_equity_usd,
+                        )
+                        _exec_open_count = await count_open_executed_positions()
+                        _exec_today_pnl = await today_realised_pnl_usd()
+                    except Exception as e:
+                        logger.warning("auto-exec preflight failed: %s", e)
                 for sig in signals:
                     sig_dict = sig.model_dump()
                     sig_dict["created_at"] = sig_dict["created_at"].isoformat()
@@ -167,15 +193,18 @@ async def _signal_scan_loop():
                     # dry-run); we just hand it the signal and forget.
                     if settings.AUTO_EXECUTION_ENABLED:
                         try:
-                            from app.execution.ccxt_executor import (
-                                ccxt_executor, get_account_equity_usd,
-                            )
-                            equity = get_account_equity_usd()
-                            result = ccxt_executor.place_for_signal(
+                            from app.execution.ccxt_executor import ccxt_executor
+                            # `place_for_signal` may make synchronous ccxt
+                            # calls in the live (non-dry-run) path, so it too
+                            # is wrapped in to_thread to avoid blocking the
+                            # event loop while N other signals are being
+                            # broadcast and saved.
+                            result = await asyncio.to_thread(
+                                ccxt_executor.place_for_signal,
                                 sig_dict,
-                                equity_usd=equity,
-                                open_positions_count=0,
-                                today_pnl_usd=0.0,
+                                _exec_equity,
+                                _exec_open_count,
+                                _exec_today_pnl,
                             )
                             if result.get("ok"):
                                 logger.info(
