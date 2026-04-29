@@ -12,6 +12,7 @@ from app.api.websocket_routes import ws_router
 from app.api.phase3_routes import phase3_router
 from app.api.orderflow_routes import orderflow_router
 from app.api.notifications_routes import notifications_router
+from app.api.execution_routes import execution_router
 from app.exchanges.binance_client import binance_client
 from app.signals.signal_generator import signal_generator
 from app.database.models import save_signal
@@ -57,6 +58,7 @@ app.include_router(ws_router, tags=["WebSocket"])
 app.include_router(phase3_router, prefix="/api", tags=["Phase 3"])
 app.include_router(orderflow_router, prefix="/api", tags=["Order Flow"])
 app.include_router(notifications_router, tags=["Notifications"])
+app.include_router(execution_router, tags=["Execution"])
 
 
 @app.on_event("startup")
@@ -147,6 +149,41 @@ async def _signal_scan_loop():
             else:
                 logger.info("Signal scan loop: scanning all coins...")
                 signals = await signal_generator.scan_all()
+                # Hoist equity / position / PnL fetches OUT of the per-signal
+                # loop. The previous version called get_account_equity_usd()
+                # for every signal, which (a) blocks the asyncio event loop
+                # on each sync ccxt round-trip and (b) burns rate limit. Read
+                # them once per cycle and pass cached values down.
+                _exec_equity: float = 0.0
+                _exec_open_count: int = 0
+                _exec_today_pnl: float = 0.0
+                if settings.AUTO_EXECUTION_ENABLED and signals:
+                    try:
+                        from app.execution.ccxt_executor import (
+                            get_account_equity_usd,
+                        )
+                        from app.execution.state import (
+                            count_open_executed_positions,
+                            today_realised_pnl_usd,
+                        )
+                        # ccxt fetch_balance is synchronous; run it off-thread
+                        # so it can't stall the event loop.
+                        _exec_equity = await asyncio.to_thread(
+                            get_account_equity_usd,
+                        )
+                        _exec_open_count = await count_open_executed_positions()
+                        _exec_today_pnl = await today_realised_pnl_usd()
+                    except Exception as e:
+                        logger.warning("auto-exec preflight failed: %s", e)
+                        # Fail closed: if any of the three preflight reads
+                        # failed, force `_exec_equity = 0.0` so the guardian
+                        # rejects every signal in this cycle as zero_equity
+                        # rather than placing trades against partial state
+                        # (which would silently bypass the position cap and
+                        # daily-loss circuit breaker).
+                        _exec_equity = 0.0
+                        _exec_open_count = 0
+                        _exec_today_pnl = 0.0
                 for sig in signals:
                     sig_dict = sig.model_dump()
                     sig_dict["created_at"] = sig_dict["created_at"].isoformat()
@@ -159,6 +196,59 @@ async def _signal_scan_loop():
                         await telegram_client.send_signal(sig_dict)
                     except Exception as e:
                         logger.warning("telegram push failed: %s", e)
+                    # Optional auto-execution. Off unless AUTO_EXECUTION_ENABLED
+                    # and the user has armed via TOTP. The executor itself
+                    # handles every gate (kill switch, caps, idempotency,
+                    # dry-run); we just hand it the signal and forget.
+                    if settings.AUTO_EXECUTION_ENABLED:
+                        try:
+                            from app.execution.ccxt_executor import ccxt_executor
+                            # `place_for_signal` may make synchronous ccxt
+                            # calls in the live (non-dry-run) path, so it too
+                            # is wrapped in to_thread to avoid blocking the
+                            # event loop while N other signals are being
+                            # broadcast and saved.
+                            result = await asyncio.to_thread(
+                                ccxt_executor.place_for_signal,
+                                sig_dict,
+                                _exec_equity,
+                                _exec_open_count,
+                                _exec_today_pnl,
+                            )
+                            if result.get("ok"):
+                                logger.info(
+                                    "auto-exec placed %s for signal %s "
+                                    "(dry_run=%s)",
+                                    result.get("order_id"), sig_dict.get("id"),
+                                    result.get("dry_run"),
+                                )
+                                # Update the in-batch counters so subsequent
+                                # signals in the same scan cycle see the
+                                # *new* position. Without this, a cycle that
+                                # produces N>cap signals would all see the
+                                # same stale `_exec_open_count` and bypass
+                                # the concurrent-position cap. Apply only
+                                # for live placements — dry-run records
+                                # don't count as open positions.
+                                if result.get("dry_run") is False:
+                                    _exec_open_count += 1
+                                    # Pessimistically debit the daily-loss
+                                    # circuit breaker by the trade's risk_usd.
+                                    # If the trade later wins this is
+                                    # corrected on the next cycle when we
+                                    # re-read realised PnL; if it loses, the
+                                    # breaker tripped early — both desirable.
+                                    plan = result.get("plan") or {}
+                                    _exec_today_pnl -= float(
+                                        plan.get("risk_usd") or 0.0,
+                                    )
+                            else:
+                                logger.info(
+                                    "auto-exec skipped signal %s: %s",
+                                    sig_dict.get("id"), result.get("reason"),
+                                )
+                        except Exception as e:
+                            logger.warning("auto-exec failed: %s", e)
                 logger.info(f"Signal scan complete: {len(signals)} signals generated")
         except Exception as e:
             logger.warning(f"Signal scan loop error: {e}")
