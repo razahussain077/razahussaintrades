@@ -175,6 +175,15 @@ async def _signal_scan_loop():
                         _exec_today_pnl = await today_realised_pnl_usd()
                     except Exception as e:
                         logger.warning("auto-exec preflight failed: %s", e)
+                        # Fail closed: if any of the three preflight reads
+                        # failed, force `_exec_equity = 0.0` so the guardian
+                        # rejects every signal in this cycle as zero_equity
+                        # rather than placing trades against partial state
+                        # (which would silently bypass the position cap and
+                        # daily-loss circuit breaker).
+                        _exec_equity = 0.0
+                        _exec_open_count = 0
+                        _exec_today_pnl = 0.0
                 for sig in signals:
                     sig_dict = sig.model_dump()
                     sig_dict["created_at"] = sig_dict["created_at"].isoformat()

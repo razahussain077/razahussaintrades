@@ -135,10 +135,9 @@ async def execution_place(body: PlaceRequest) -> dict:
     """Manually trigger placement for a single signal id (must already exist)."""
     import asyncio as _aio
 
-    from app.database.models import get_signals  # local import to avoid cycle
-
-    rows = await get_signals(limit=200, is_active=None)
-    signal = next((s for s in rows if str(s.get("id")) == body.signal_id), None)
+    # Direct PK lookup — get_signals(limit=200) misses older signals.
+    from app.database.models import get_signal_by_id
+    signal = await get_signal_by_id(body.signal_id)
     if signal is None:
         raise HTTPException(status_code=404,
                             detail=f"signal {body.signal_id} not found")
@@ -166,10 +165,14 @@ async def execution_preview(body: PreviewRequest) -> dict:
     Useful for testing what *would* happen for a given signal — independent of
     the armed flag and the real exchange. Always safe.
     """
+    import asyncio as _aio
+
+    # ccxt fetch_balance is synchronous; run off-thread so it can't stall
+    # the event loop.
     equity = (
         body.equity_usd
         if body.equity_usd is not None
-        else (get_account_equity_usd() or 1000.0)
+        else (await _aio.to_thread(get_account_equity_usd) or 1000.0)
     )
     decision = account_guardian.evaluate(
         body.signal,
