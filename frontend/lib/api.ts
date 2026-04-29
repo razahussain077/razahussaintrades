@@ -272,3 +272,40 @@ export interface StreamsHealth {
 export async function fetchStreamsHealth(): Promise<StreamsHealth> {
   return apiFetch<StreamsHealth>('/api/orderflow/streams/health')
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// PR6: notifications + kill switch
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface KillSwitchState {
+  active: boolean
+  reason: string | null
+  set_at: string | null
+  set_by: string | null
+}
+
+export interface NotificationsStatus {
+  telegram_configured: boolean
+  notifications_enabled: boolean
+  dashboard_url: string
+  kill_switch: KillSwitchState
+}
+
+export async function fetchNotificationsStatus(): Promise<NotificationsStatus> {
+  return apiFetch<NotificationsStatus>('/api/notifications/status')
+}
+
+export async function setKillSwitch(
+  active: boolean,
+  reason?: string,
+): Promise<KillSwitchState> {
+  return apiFetch<KillSwitchState>('/api/notifications/kill-switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active, reason: reason ?? null, set_by: 'dashboard' }),
+  })
+}
+
+export async function sendTelegramTest(): Promise<{ ok: boolean; reason?: string }> {
+  return apiFetch<{ ok: boolean; reason?: string }>('/api/notifications/test', { method: 'POST' })
+}

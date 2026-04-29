@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     LTF_TRIGGER_LOOKBACK: int = 24    # bars on the trigger TF to scan for sweep
     LTF_TRIGGER_RECLAIM_BARS: int = 3  # close-back-above must happen within N bars
 
+    # Telegram push notifications (PR6).
+    # Both token and chat id must be set to enable; the client is a no-op
+    # otherwise. NOTIFICATIONS_ENABLED is the master kill — separate from
+    # the user-facing kill switch (kill_switch.py) which is a runtime toggle.
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+    NOTIFICATIONS_ENABLED: bool = True
+    DASHBOARD_URL: str = ""  # public URL used for inline-keyboard buttons
+
     TOP_50_COINS: List[str] = [
         "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
         "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "TRXUSDT",
