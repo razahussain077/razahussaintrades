@@ -159,13 +159,24 @@ export interface FundingRateData {
 
 export interface MLStats {
   active: boolean
-  accuracy: number
-  total_samples: number
-  last_trained?: string
-  feature_importance: Record<string, number>
+  // PR4: legacy `accuracy` is gone — replaced with walk-forward AUC + Brier.
+  accuracy?: number
+  total_samples?: number
+  last_trained?: string | null
+  feature_importance?: Record<string, number>
   buffered_samples: number
   min_samples_needed: number
   samples_until_active: number
+  // PR4 additions
+  model_type?: string
+  n_features?: number
+  feature_names?: string[]
+  n_samples_trained?: number
+  n_positive?: number
+  walk_forward_auc?: number | null
+  walk_forward_brier?: number | null
+  per_regime_n?: Record<string, number>
+  per_regime_auc?: Record<string, number | null>
 }
 
 export interface BacktestResult {

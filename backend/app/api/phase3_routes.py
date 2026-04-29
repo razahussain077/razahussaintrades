@@ -206,8 +206,11 @@ async def get_risk_settings():
 )
 async def get_ml_stats():
     """
-    Returns ML model accuracy, feature importance, training status.
-    ML activates after 50 completed signals.
+    Returns ML model walk-forward AUC + Brier loss, per-regime sample
+    counts and AUCs, gain-based feature importance, training status, and
+    a list of feature names. ML activates after 200 completed signals
+    (raised from 50 in PR #4 — the prior threshold produced very noisy
+    estimates with the 19-feature schema).
     """
     return ml_engine.get_stats()
 
