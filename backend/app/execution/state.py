@@ -94,14 +94,23 @@ def set_armed(
     last_totp_step: Optional[int] = None,
     set_by: str = "system",
 ) -> Dict:
-    """Persist a new armed state. `armed_until` is only honored when armed=True."""
+    """Persist a new armed state. `armed_until` is only honored when armed=True.
+
+    `last_totp_step` is **preserved across disarm** — clearing it on disarm
+    would let a caller replay the same TOTP code within its 30s validity
+    window after a disarm→rearm cycle. We only ever advance it.
+    """
     with _lock:
+        prev = _load(_armed_path(), _armed_default())
         state = _armed_default()
         state["armed"] = bool(armed)
         if armed and armed_until is not None:
             state["armed_until"] = armed_until.astimezone(timezone.utc).isoformat()
+        # Preserve last_totp_step so replay protection survives disarm/rearm.
         if last_totp_step is not None:
             state["last_totp_step"] = int(last_totp_step)
+        else:
+            state["last_totp_step"] = prev.get("last_totp_step")
         state["set_at"] = datetime.now(timezone.utc).isoformat()
         state["set_by"] = set_by
         _save(_armed_path(), state)

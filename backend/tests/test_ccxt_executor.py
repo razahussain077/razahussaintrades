@@ -237,5 +237,50 @@ class TestLivePath:
         r = ex.place_for_signal(_signal(id="sig-boom"), 10000, 0, 0.0,
                                 force_dry_run=False)
         assert r["ok"] is False
+        # Entry never placed → safe-to-retry rejection.
         assert r["reason"] == "exchange_error"
         assert "network down" in r["detail"]
+        # And the idempotency map is empty — retries are allowed.
+        assert exec_state.get_recorded_order("sig-boom") is None
+
+    def test_partial_bracket_records_entry_and_blocks_retry(
+        self, monkeypatch, armed,
+    ):
+        """Entry filled, SL submission errored. Caller must record the entry
+        in the idempotency map so a retry can't double the position."""
+        monkeypatch.setattr(settings, "AUTO_EXECUTION_ENABLED", True)
+        monkeypatch.setattr(settings, "AUTO_EXECUTION_DRY_RUN", False)
+
+        call_count = {"n": 0}
+
+        class PartialExchange:
+            def set_leverage(self, *a, **k): pass
+
+            def create_order(self, *a, **k):
+                call_count["n"] += 1
+                # First call = entry (success). All subsequent = boom.
+                if call_count["n"] == 1:
+                    return {"id": "entry-99"}
+                raise RuntimeError("rate limited")
+
+        ex = CCXTExecutor()
+        ex._exchange = PartialExchange()
+        r1 = ex.place_for_signal(_signal(id="sig-partial"), 10000, 0, 0.0,
+                                 force_dry_run=False)
+        assert r1["ok"] is False
+        assert r1["reason"] == "bracket_partial"
+        assert r1["order_id"] == "entry-99"
+        # Critically: entry IS recorded.
+        rec = exec_state.get_recorded_order("sig-partial")
+        assert rec is not None
+        assert rec["order_id"] == "entry-99"
+        assert rec["dry_run"] is False
+        assert rec["payload"]["partial"] is True
+
+        # Now the retry: must short-circuit on the idempotency map, NOT
+        # re-place a second entry.
+        ex._exchange = PartialExchange()  # fresh counter
+        r2 = ex.place_for_signal(_signal(id="sig-partial"), 10000, 0, 0.0,
+                                 force_dry_run=False)
+        assert r2["ok"] is False
+        assert r2["reason"] == "duplicate_signal"

@@ -161,19 +161,45 @@ class CCXTExecutor:
                                   "orders": orders})
             return ExecutionResult.ok(order_id, decision.plan, True, orders)
 
-        # Real execution path.
+        # Real execution path. `_place_real_bracket` is structured so a
+        # *partial* failure (entry filled, SL/TP submission errored) still
+        # returns the entry order id so we can record it in the idempotency
+        # map and prevent a retry from doubling the position.
         try:
-            order_id, orders = self._place_real_bracket(decision.plan)
+            order_id, orders, partial_error = self._place_real_bracket(decision.plan)
         except Exception as e:
-            logger.exception("CCXT bracket placement failed: %s", e)
+            logger.exception("CCXT bracket placement failed pre-entry: %s", e)
+            # Entry was never placed → safe to retry.
             return ExecutionResult.reject(
                 "exchange_error",
                 f"{type(e).__name__}: {e}",
             )
 
-        record_order(signal_id, order_id, dry_run=False,
-                     payload={"plan": decision.plan.as_dict(),
-                              "orders": orders})
+        record_order(
+            signal_id, order_id, dry_run=False,
+            payload={
+                "plan": decision.plan.as_dict(),
+                "orders": orders,
+                "partial": partial_error is not None,
+                "partial_error": (
+                    f"{type(partial_error).__name__}: {partial_error}"
+                    if partial_error is not None else None
+                ),
+            },
+        )
+        if partial_error is not None:
+            logger.error(
+                "BRACKET PARTIAL — entry %s filled but exit legs failed: %s. "
+                "Position is UNHEDGED. Manual intervention required.",
+                order_id, partial_error,
+            )
+            return ExecutionResult.reject(
+                "bracket_partial",
+                f"Entry order {order_id} placed but exit legs failed: "
+                f"{type(partial_error).__name__}: {partial_error}. "
+                f"Position is unhedged — close manually.",
+                order_id=order_id,
+            )
         return ExecutionResult.ok(order_id, decision.plan, False, orders)
 
     # ------------------------------------------------------------------
@@ -220,14 +246,21 @@ class CCXTExecutor:
              "amount": q3, "reduceOnly": True, "purpose": "TAKE_PROFIT_3"},
         ]
 
-    def _place_real_bracket(self, plan: OrderPlan) -> tuple[str, List[Dict]]:
-        """Submit the bracket to the live exchange. Returns (entry_order_id, payloads).
+    def _place_real_bracket(
+        self, plan: OrderPlan,
+    ) -> tuple[str, List[Dict], Optional[Exception]]:
+        """Submit the bracket to the live exchange.
 
-        Raises on any failure — caller wraps to convert into a rejection. The
-        first network call is the entry order; if SL/TP submission fails after
-        the entry is open we *raise* and let the caller alert — leaving an
-        unhedged position is the correct behaviour vs. silently retrying with
-        unknown state.
+        Returns `(entry_order_id, payloads, partial_error)`:
+          * If everything succeeded, `partial_error is None`.
+          * If the entry order filled but a subsequent SL/TP submission
+            raised, the entry order id is returned alongside the captured
+            exception so the caller can persist the entry into the
+            idempotency map (preventing a retry from doubling the position)
+            and surface a clear "bracket_partial" rejection.
+
+        Raises only when the *entry* order fails — at that point nothing has
+        been placed and a retry is safe.
         """
         if self._exchange is None:
             self._exchange = _make_exchange()
@@ -236,27 +269,38 @@ class CCXTExecutor:
         side_entry = "buy" if plan.side == "LONG" else "sell"
         side_exit = "sell" if plan.side == "LONG" else "buy"
 
-        # Set leverage if the exchange exposes it.
+        # Set leverage if the exchange exposes it. Best-effort — never fails
+        # placement.
         try:
             if hasattr(ex, "set_leverage"):
                 ex.set_leverage(int(plan.leverage), plan.coin)
         except Exception as e:  # pragma: no cover — best effort
             logger.warning("set_leverage failed (continuing): %s", e)
 
+        # Entry — if this raises, nothing has been placed; let it propagate.
         entry = ex.create_order(
             plan.coin, "limit", side_entry, plan.quantity, plan.entry_mid,
             params={"clientOrderId": f"entry-{plan.signal_id}"},
         )
         entry_id = str(entry.get("id") or entry.get("orderId") or "unknown")
 
-        ex.create_order(
-            plan.coin, "stop_market", side_exit, plan.quantity, None,
-            params={
-                "stopPrice": plan.stop_loss,
-                "reduceOnly": True,
-                "clientOrderId": f"sl-{plan.signal_id}",
-            },
-        )
+        orders = self._format_orders(plan, dry_run=False)
+
+        # From here on, exceptions are *partial-bracket* failures: the
+        # position is open, but the hedge / TPs may be missing. Capture the
+        # first error and return — the caller records the entry id into the
+        # idempotency map and surfaces a clear, alarming rejection.
+        try:
+            ex.create_order(
+                plan.coin, "stop_market", side_exit, plan.quantity, None,
+                params={
+                    "stopPrice": plan.stop_loss,
+                    "reduceOnly": True,
+                    "clientOrderId": f"sl-{plan.signal_id}",
+                },
+            )
+        except Exception as e:
+            return entry_id, orders, e
 
         q_total = plan.quantity
         s1, s2, _s3 = plan.tp_split
@@ -268,16 +312,18 @@ class CCXTExecutor:
             (plan.take_profit_2, q2, "tp2"),
             (plan.take_profit_3, q3, "tp3"),
         ):
-            ex.create_order(
-                plan.coin, "limit", side_exit, qty, tp_price,
-                params={
-                    "reduceOnly": True,
-                    "clientOrderId": f"{label}-{plan.signal_id}",
-                },
-            )
+            try:
+                ex.create_order(
+                    plan.coin, "limit", side_exit, qty, tp_price,
+                    params={
+                        "reduceOnly": True,
+                        "clientOrderId": f"{label}-{plan.signal_id}",
+                    },
+                )
+            except Exception as e:
+                return entry_id, orders, e
 
-        orders = self._format_orders(plan, dry_run=False)
-        return entry_id, orders
+        return entry_id, orders, None
 
 
 # Module singleton.

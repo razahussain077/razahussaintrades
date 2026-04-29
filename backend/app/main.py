@@ -213,6 +213,26 @@ async def _signal_scan_loop():
                                     result.get("order_id"), sig_dict.get("id"),
                                     result.get("dry_run"),
                                 )
+                                # Update the in-batch counters so subsequent
+                                # signals in the same scan cycle see the
+                                # *new* position. Without this, a cycle that
+                                # produces N>cap signals would all see the
+                                # same stale `_exec_open_count` and bypass
+                                # the concurrent-position cap. Apply only
+                                # for live placements — dry-run records
+                                # don't count as open positions.
+                                if result.get("dry_run") is False:
+                                    _exec_open_count += 1
+                                    # Pessimistically debit the daily-loss
+                                    # circuit breaker by the trade's risk_usd.
+                                    # If the trade later wins this is
+                                    # corrected on the next cycle when we
+                                    # re-read realised PnL; if it loses, the
+                                    # breaker tripped early — both desirable.
+                                    plan = result.get("plan") or {}
+                                    _exec_today_pnl -= float(
+                                        plan.get("risk_usd") or 0.0,
+                                    )
                             else:
                                 logger.info(
                                     "auto-exec skipped signal %s: %s",

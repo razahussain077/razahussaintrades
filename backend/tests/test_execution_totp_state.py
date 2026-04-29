@@ -109,6 +109,19 @@ class TestArmedState:
         assert s["armed"] is False
         assert s["armed_until"] is None
 
+    def test_disarm_preserves_last_totp_step(self):
+        """Replay protection regression — disarming and re-arming with the
+        same TOTP code (within the 30s window) must remain blocked."""
+        until = datetime.now(timezone.utc) + timedelta(minutes=5)
+        exec_state.set_armed(True, armed_until=until, last_totp_step=12345)
+        # Disarm without passing last_totp_step.
+        exec_state.set_armed(False, set_by="user-panic-button")
+        s = exec_state.get_armed_state()
+        assert s["armed"] is False
+        # Step is preserved so the next arm() call's verify_totp call still
+        # rejects code reuse.
+        assert s["last_totp_step"] == 12345
+
 
 class TestIdempotencyMap:
     def setup_method(self):
