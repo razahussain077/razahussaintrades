@@ -15,6 +15,7 @@ from app.exchanges.binance_client import binance_client
 from app.signals.signal_generator import signal_generator
 from app.database.models import save_signal
 from app.streams import stream_supervisor
+from app.services.calendar_provider import refresh_calendar_loop
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
@@ -92,6 +93,10 @@ async def startup_event():
     asyncio.create_task(_signal_monitor_loop())
     asyncio.create_task(_ml_retrain_loop())
     asyncio.create_task(_funding_rate_refresh_loop())
+    # Real economic calendar — refreshes every 6h from ForexFactory mirror.
+    # Until the first fetch lands the news engine emits synthesized fallback
+    # events tagged `is_indicative=True`.
+    asyncio.create_task(refresh_calendar_loop())
     logger.info("API startup complete — all background tasks started")
 
 

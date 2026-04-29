@@ -127,8 +127,22 @@ export async function fetchUpcomingEvents(daysAhead: number = 7): Promise<{
   next_event: EconomicEvent | null
   active_warnings: string[]
   has_active_warnings: boolean
+  source?: string
+  is_indicative?: boolean
+  fetched_at?: string | null
 }> {
   return apiFetch(`/api/events/upcoming?days_ahead=${daysAhead}`)
+}
+
+export interface CalendarStatus {
+  source: string
+  events_cached: number
+  is_indicative: boolean
+  fetched_at: string | null
+}
+
+export async function fetchCalendarStatus(): Promise<CalendarStatus> {
+  return apiFetch<CalendarStatus>('/api/events/calendar/status')
 }
 
 export async function fetchSignalHistory(params: {

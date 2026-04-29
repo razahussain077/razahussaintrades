@@ -3,7 +3,23 @@
 import { useState, useEffect } from 'react'
 import { fetchUpcomingEvents } from '@/lib/api'
 import type { EconomicEvent } from '@/lib/types'
-import { Calendar, AlertTriangle, Clock } from 'lucide-react'
+import { Calendar, AlertTriangle, Clock, Info } from 'lucide-react'
+
+function eventTitle(e: EconomicEvent): string {
+  return e.title ?? e.name ?? 'Untitled event'
+}
+
+function eventDatetime(e: EconomicEvent): string {
+  return e.datetime ?? e.datetime_utc ?? ''
+}
+
+function eventKey(e: EconomicEvent, i: number): string {
+  return e.id ?? `${eventTitle(e)}-${eventDatetime(e)}-${i}`
+}
+
+function eventIsActive(e: EconomicEvent): boolean {
+  return Boolean(e.is_warning_active ?? e.is_active_warning)
+}
 
 const IMPACT_STYLES: Record<string, string> = {
   HIGH: 'bg-red-100 text-red-700 border-red-200',
@@ -15,6 +31,8 @@ export default function EventsPage() {
   const [events, setEvents] = useState<EconomicEvent[]>([])
   const [nextEvent, setNextEvent] = useState<EconomicEvent | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
+  const [source, setSource] = useState<string | null>(null)
+  const [isIndicative, setIsIndicative] = useState<boolean>(false)
   const [loading, setLoading] = useState(true)
   const [daysAhead, setDaysAhead] = useState(7)
 
@@ -24,7 +42,9 @@ export default function EventsPage() {
       const res = await fetchUpcomingEvents(daysAhead)
       setEvents(res.events ?? [])
       setNextEvent(res.next_event ?? null)
-      setWarnings(res.active_warnings ?? [])
+      setWarnings((res.active_warnings ?? []) as string[])
+      setSource(res.source ?? null)
+      setIsIndicative(Boolean(res.is_indicative))
     } catch {
       // silent
     } finally {
@@ -50,6 +70,23 @@ export default function EventsPage() {
         </p>
       </div>
 
+      {isIndicative && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+          <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-amber-800">
+            <p className="font-semibold">Approximate dates</p>
+            <p className="text-amber-700">
+              The live calendar fetch failed (or hasn&apos;t completed yet). Events below are
+              synthesized from a recurring schedule and may be off by hours or days.
+              The bot will resume real published times automatically once the next refresh succeeds.
+            </p>
+          </div>
+        </div>
+      )}
+      {!isIndicative && source && source !== 'never_fetched' && (
+        <p className="text-xs text-gray-400">Source: {source}</p>
+      )}
+
       {/* Active Warnings */}
       {warnings.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-1.5">
@@ -72,8 +109,8 @@ export default function EventsPage() {
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
-              <p className="font-semibold text-gray-900">{nextEvent.title}</p>
-              <p className="text-xs text-gray-500">{nextEvent.currency} • {new Date(nextEvent.datetime).toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">{eventTitle(nextEvent)}</p>
+              <p className="text-xs text-gray-500">{nextEvent.currency} • {eventDatetime(nextEvent) ? new Date(eventDatetime(nextEvent)).toLocaleString() : 'unknown'}</p>
             </div>
             <div className="flex items-center gap-2">
               <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full border ${IMPACT_STYLES[nextEvent.impact] ?? IMPACT_STYLES.LOW}`}>
@@ -126,22 +163,31 @@ export default function EventsPage() {
           <div className="divide-y divide-gray-100">
             {events.map((event) => (
               <div
-                key={event.id}
+                key={eventKey(event, events.indexOf(event))}
                 className={`px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
-                  event.is_warning_active ? 'bg-amber-50' : ''
+                  eventIsActive(event) ? 'bg-amber-50' : ''
                 }`}
               >
                 <div className="flex items-start gap-3">
-                  {event.is_warning_active && (
+                  {eventIsActive(event) && (
                     <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
                   )}
                   <div>
-                    <p className="font-semibold text-gray-900 text-sm">{event.title}</p>
+                    <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+                      {eventTitle(event)}
+                      {event.is_indicative && (
+                        <span className="text-[10px] uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                          approx
+                        </span>
+                      )}
+                    </p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-gray-500">{event.currency}</span>
                       <span className="text-gray-300">•</span>
                       <span className="text-xs text-gray-500">
-                        {new Date(event.datetime).toLocaleString()}
+                        {eventDatetime(event)
+                          ? new Date(eventDatetime(event)).toLocaleString()
+                          : 'unknown'}
                       </span>
                       {event.minutes_until != null && event.minutes_until > 0 && (
                         <>
