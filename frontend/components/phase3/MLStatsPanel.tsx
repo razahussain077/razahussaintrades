@@ -40,33 +40,69 @@ export function MLStatsPanel() {
       {stats.active ? (
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-purple-50 rounded-lg p-3">
-            <p className="text-xs text-gray-500">Accuracy</p>
-            <p className="text-lg font-bold text-purple-700">{stats.accuracy}%</p>
+            <p className="text-xs text-gray-500">Walk-forward AUC</p>
+            <p className="text-lg font-bold text-purple-700">
+              {stats.walk_forward_auc != null
+                ? stats.walk_forward_auc.toFixed(3)
+                : stats.accuracy != null
+                ? `${stats.accuracy.toFixed(1)}%`
+                : 'n/a'}
+            </p>
+            {stats.walk_forward_brier != null && (
+              <p className="text-[10px] text-gray-400 mt-0.5">
+                Brier {stats.walk_forward_brier.toFixed(3)} (lower = better)
+              </p>
+            )}
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
             <p className="text-xs text-gray-500">Trained On</p>
-            <p className="text-lg font-bold text-gray-900">{stats.total_samples}</p>
-            <p className="text-xs text-gray-400">signals</p>
+            <p className="text-lg font-bold text-gray-900">
+              {stats.n_samples_trained ?? stats.total_samples ?? 0}
+            </p>
+            <p className="text-xs text-gray-400">
+              signals
+              {stats.n_positive != null
+                ? ` (${Math.round((stats.n_positive / Math.max(1, (stats.n_samples_trained ?? 1))) * 100)}% wins)`
+                : ''}
+            </p>
           </div>
           {stats.last_trained && (
             <div className="col-span-2 flex items-center gap-1.5 text-xs text-gray-400">
               <Clock className="w-3 h-3" />
-              Last trained: {new Date(stats.last_trained).toLocaleDateString()}
+              Last trained: {new Date(stats.last_trained).toLocaleDateString()} ({stats.model_type ?? 'lightgbm'})
             </div>
           )}
-          {Object.keys(stats.feature_importance).length > 0 && (
+          {stats.per_regime_n && Object.keys(stats.per_regime_n).length > 0 && (
             <div className="col-span-2">
-              <p className="text-xs text-gray-500 mb-2">Top Features</p>
+              <p className="text-xs text-gray-500 mb-1">Per-regime samples / AUC</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {Object.entries(stats.per_regime_n).map(([regime, n]) => {
+                  const auc = stats.per_regime_auc?.[regime]
+                  return (
+                    <div key={regime} className="text-[11px] flex items-center justify-between bg-gray-50 rounded px-2 py-1">
+                      <span className="text-gray-600 capitalize">{regime}</span>
+                      <span className="text-gray-900 font-medium">
+                        {n}{auc != null ? ` · ${auc.toFixed(2)}` : ''}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {stats.feature_importance && Object.keys(stats.feature_importance).length > 0 && (
+            <div className="col-span-2">
+              <p className="text-xs text-gray-500 mb-2">Top Features (gain)</p>
               {Object.entries(stats.feature_importance)
                 .sort(([, a], [, b]) => b - a)
-                .slice(0, 3)
+                .slice(0, 5)
                 .map(([name, pct]) => (
                   <div key={name} className="flex items-center gap-2 mb-1">
-                    <span className="text-xs text-gray-600 w-28">{name}</span>
+                    <span className="text-xs text-gray-600 w-32 truncate">{name}</span>
                     <div className="flex-1 bg-gray-200 rounded-full h-1.5">
-                      <div className="bg-purple-400 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                      <div className="bg-purple-400 h-1.5 rounded-full" style={{ width: `${Math.min(100, pct)}%` }} />
                     </div>
-                    <span className="text-xs text-gray-500 w-8">{pct}%</span>
+                    <span className="text-xs text-gray-500 w-10 text-right">{pct.toFixed(1)}%</span>
                   </div>
                 ))}
             </div>
