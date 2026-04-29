@@ -36,6 +36,23 @@ class Settings(BaseSettings):
     MAX_LEVERAGE: float = 10.0
     MIN_CONFIDENCE_SCORE: float = 60.0
 
+    # Trading cost defaults — used to model realistic PnL in backtest and to show
+    # fee-adjusted R/R on live signals. Defaults are Binance USDⓂ-Futures retail
+    # tier (taker 0.04%, maker 0.02%); override via env for VIP/maker rebate tiers.
+    FEE_BPS_TAKER: float = 4.0   # 0.04% per side
+    FEE_BPS_MAKER: float = 2.0   # 0.02% per side
+    # Default per-trade account risk used by backtest equity simulation.
+    BACKTEST_RISK_PER_TRADE_PCT: float = 1.0
+    # Funding rate to assume for backtests when no historical funding data is
+    # available, expressed per 8h period. 0.0001 == 0.01% per 8h ≈ neutral.
+    BACKTEST_DEFAULT_FUNDING_RATE_PER_8H: float = 0.0001
+    # Whether to subtract round-trip fees + funding from backtest PnL by default.
+    BACKTEST_INCLUDE_COSTS: bool = True
+
+    # Comma-separated list of allowed CORS origins. Defaults to "*" only when
+    # ENVIRONMENT == "development". In production, set this explicitly.
+    ALLOWED_ORIGINS: str = "*"
+
     TOP_50_COINS: List[str] = [
         "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
         "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "TRXUSDT",

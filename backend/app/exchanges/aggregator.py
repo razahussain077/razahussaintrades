@@ -17,8 +17,13 @@ class AggregatedPrice:
         self.binance_price: float = 0.0
         self.bybit_price: float = 0.0
         self.okx_price: float = 0.0
-        self.best_bid: float = 0.0
-        self.best_ask: float = 0.0
+        # NOTE: these are NOT bid/ask. They are min/max of *last-trade* prices
+        # across exchanges — useful as a cross-exchange dispersion proxy, NOT
+        # as a real top-of-book spread. The misleading `best_bid`/`best_ask`
+        # names are kept as aliases for backwards compatibility but new code
+        # should read `min_exchange_price` / `max_exchange_price`.
+        self.min_exchange_price: float = 0.0
+        self.max_exchange_price: float = 0.0
         self.average_price: float = 0.0
         self.volume_24h: float = 0.0
         self.price_change_pct_24h: float = 0.0
@@ -92,8 +97,8 @@ class ExchangeAggregator:
 
         if prices:
             result.average_price = sum(prices) / len(prices)
-            result.best_bid = min(prices)
-            result.best_ask = max(prices)
+            result.min_exchange_price = min(prices)
+            result.max_exchange_price = max(prices)
 
         return result
 

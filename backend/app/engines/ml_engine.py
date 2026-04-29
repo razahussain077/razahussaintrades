@@ -2,6 +2,23 @@
 Machine Learning Confidence Booster — Feature 5
 Uses scikit-learn Random Forest to predict signal outcome probability.
 Requires minimum 50 past signals to activate.
+
+WARNING (PR #1 — foundation fixes):
+This implementation has known methodology issues that PR #4 will fix:
+
+  1. Selection-biased training data — only signals the bot itself emitted are
+     ever fed in, so the "no-signal" half of state space is unobserved.
+  2. MIN_SAMPLES = 50 is far too low to learn 9 features reliably; the model
+     score is mostly noise until you have 500+ samples.
+  3. Random k-fold CV leaks future into past on time-ordered data; should be
+     `TimeSeriesSplit` with a strict holdout.
+  4. Probabilities are uncalibrated — "85% confidence" does not mean 85%
+     win rate empirically. PR #4 will add `CalibratedClassifierCV`.
+  5. Single global model averages across regimes; PR #4 introduces
+     per-regime models (trending / ranging / volatile / squeeze).
+
+Until PR #4 lands, the ML score should be treated as a soft tiebreaker, not
+an authoritative confidence input.
 """
 import logging
 import os

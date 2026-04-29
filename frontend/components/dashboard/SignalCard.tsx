@@ -154,6 +154,14 @@ export function SignalCard({ signal }: SignalCardProps) {
           <div className="bg-gray-50 rounded-lg p-2.5">
             <p className="text-xs text-gray-500 mb-0.5">Risk / Reward</p>
             <p className="font-bold text-gray-900">1 : {signal.risk_reward.toFixed(1)}</p>
+            {typeof signal.risk_reward_net === 'number' && (
+              <p
+                className="text-[10px] text-gray-500 mt-0.5"
+                title="Net of round-trip fees + one funding period"
+              >
+                Net: 1 : {signal.risk_reward_net.toFixed(1)}
+              </p>
+            )}
           </div>
         </div>
 

@@ -28,11 +28,21 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS - allow all for dev
+# CORS — `*` is acceptable in development but unsafe in production. Honor the
+# `ALLOWED_ORIGINS` setting (comma-separated list) in production. Note: when
+# `allow_origins=["*"]` is used, the spec requires `allow_credentials=False`.
+_origins_raw = (settings.ALLOWED_ORIGINS or "*").strip()
+if _origins_raw == "*" or settings.ENVIRONMENT == "development":
+    _allow_origins: list[str] = ["*"]
+    _allow_credentials = False
+else:
+    _allow_origins = [o.strip() for o in _origins_raw.split(",") if o.strip()]
+    _allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allow_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

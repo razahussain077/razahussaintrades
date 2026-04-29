@@ -16,6 +16,7 @@ from app.engines.entry_engine import entry_engine
 from app.engines.risk_engine import risk_engine, update_risk_settings
 from app.engines.ml_engine import ml_engine
 from app.engines.backtest_engine import backtest_engine
+from app.engines.walkforward_engine import walkforward_engine
 from app.engines.news_engine import news_engine
 from app.engines.regime_engine import regime_engine
 from app.exchanges.binance_client import binance_client
@@ -286,6 +287,55 @@ async def get_backtest_results():
 async def get_paper_trading_status():
     """Get current paper trading portfolio status."""
     return backtest_engine.get_paper_status()
+
+
+class WalkForwardRequest(BaseModel):
+    symbol: str
+    timeframe: str = "1h"
+    history_days: int = 180
+    window_days: int = 30
+    starting_balance: float = 1000.0
+    risk_per_trade_pct: Optional[float] = None
+    include_costs: Optional[bool] = None
+    fee_bps_per_side: Optional[float] = None
+    funding_rate_per_period: Optional[float] = None
+
+
+@phase3_router.post(
+    "/backtest/walkforward",
+    summary="Run a walk-forward backtest across multiple non-overlapping windows",
+    tags=["Phase 3 - Backtest"],
+)
+async def run_walkforward_backtest(req: WalkForwardRequest):
+    """
+    Run a walk-forward backtest. Slides a non-overlapping `window_days`
+    window across `history_days` of history and returns per-window stats
+    plus a cross-window aggregate including a `consistency_score` (fraction
+    of windows that were profitable). When `include_costs` is true (default
+    via settings) the equity curve is net of round-trip exchange fees and
+    funding cost.
+    """
+    try:
+        symbol = req.symbol.upper()
+        result = await walkforward_engine.run(
+            symbol,
+            req.timeframe,
+            history_days=min(req.history_days, 365),
+            window_days=max(1, req.window_days),
+            starting_balance=req.starting_balance,
+            risk_per_trade_pct=req.risk_per_trade_pct,
+            include_costs=req.include_costs,
+            fee_bps_per_side=req.fee_bps_per_side,
+            funding_rate_per_period=req.funding_rate_per_period,
+        )
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"walkforward backtest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

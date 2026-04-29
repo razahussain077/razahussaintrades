@@ -87,5 +87,19 @@ async def init_db() -> None:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_history_signal ON signal_history(signal_id)")
 
+        # ── Idempotent column additions for new fields ──
+        # Old DB files predate these columns; SQLite has no `ADD COLUMN IF NOT
+        # EXISTS`, so check pragma first.
+        async with db.execute("PRAGMA table_info(signals)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "risk_reward_net" not in cols:
+            await db.execute(
+                "ALTER TABLE signals ADD COLUMN risk_reward_net REAL DEFAULT NULL"
+            )
+        if "expected_round_trip_fee_pct" not in cols:
+            await db.execute(
+                "ALTER TABLE signals ADD COLUMN expected_round_trip_fee_pct REAL DEFAULT NULL"
+            )
+
         await db.commit()
         logger.info("Database initialized successfully")

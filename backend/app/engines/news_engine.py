@@ -1,7 +1,15 @@
 """
 News & Economic Calendar Engine — Feature 7
 Fetches upcoming economic events and adds signal warnings.
-Uses free public economic calendar APIs.
+
+WARNING (PR #1 — foundation fixes):
+This module currently *synthesizes* upcoming events from a hardcoded
+recurring schedule (`_HARDCODED_EVENTS`). The dates are plausible but they
+are NOT real published times. Until PR #3 wires a live calendar source
+(TradingEconomics free tier or ForexFactory RSS), every event returned by
+this engine is best treated as INDICATIVE ONLY. The `is_indicative` flag is
+set to True on every event so the frontend can render an "approximate"
+badge.
 """
 import asyncio
 import logging
@@ -98,6 +106,7 @@ def _generate_upcoming_events(days_ahead: int = 7) -> List[Dict]:
                 "datetime_pkt": pkt_dt.strftime("%Y-%m-%d %I:%M %p PKT"),
                 "minutes_until": minutes_until,
                 "is_active_warning": is_active_window,
+                "is_indicative": True,  # synthesized, not from live calendar — see PR #3
                 "warning_message": _get_warning_message(event_template["name"], event_template["impact"], minutes_until) if is_active_window else None,
             })
 

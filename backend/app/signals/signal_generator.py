@@ -21,6 +21,10 @@ from app.signals.models import Signal
 from app.risk.position_sizer import calculate_position_size
 from app.risk.leverage_calculator import calculate_safe_leverage
 from app.risk.anti_liquidation import get_liquidation_price
+from app.engines.fees_engine import (
+    adjust_rr_for_costs,
+    round_trip_fee_pct,
+)
 
 logger = logging.getLogger(__name__)
 PKT = pytz.timezone(settings.PKT_TIMEZONE)
@@ -313,8 +317,19 @@ async def generate_signal(symbol: str) -> Optional[Signal]:
         tp2_pct = abs(tp2 - entry_mid) / entry_mid * 100
         tp3_pct = abs(tp3 - entry_mid) / entry_mid * 100
 
-        # Risk/reward
+        # Risk/reward — gross, then cost-adjusted (round-trip fees + 1
+        # funding period of expected hold). The net R/R is what the trade
+        # actually pays out; show both so the user sees the cost drag.
         rr = tp2_pct / risk_pct if risk_pct > 0 else 0
+        rt_fee_pct = round_trip_fee_pct(settings.FEE_BPS_TAKER, taker_count=2)
+        rr_net = adjust_rr_for_costs(
+            gross_rr=rr,
+            sl_pct=risk_pct,
+            fee_bps_per_side=settings.FEE_BPS_TAKER,
+            taker_count=2,
+            funding_rate_per_period=settings.BACKTEST_DEFAULT_FUNDING_RATE_PER_8H,
+            expected_funding_periods=1.0,
+        )
 
         # Safe leverage
         nearest_liq_zone = liquidity_result.get("nearest_liquidity_below") or (entry_mid * 0.9)
@@ -367,6 +382,8 @@ async def generate_signal(symbol: str) -> Optional[Signal]:
             recommended_leverage=leverage,
             liquidation_price=liquidation_price,
             risk_reward=round(rr, 2),
+            risk_reward_net=round(rr_net, 2),
+            expected_round_trip_fee_pct=round(rt_fee_pct, 4),
             confidence_score=confidence_score,
             setup_type=setup_type,
             reasoning=reasoning,

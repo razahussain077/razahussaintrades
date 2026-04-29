@@ -23,6 +23,10 @@ class Signal(BaseModel):
     recommended_leverage: float
     liquidation_price: float
     risk_reward: float
+    # Cost-adjusted R/R after deducting round-trip exchange fees + expected
+    # funding cost over the assumed hold time. Always <= risk_reward.
+    risk_reward_net: Optional[float] = None
+    expected_round_trip_fee_pct: Optional[float] = None
     confidence_score: float
     setup_type: str
     reasoning: List[str]
