@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     # ENVIRONMENT == "development". In production, set this explicitly.
     ALLOWED_ORIGINS: str = "*"
 
+    # Lower-timeframe entry refinement (PR5).
+    # When enabled, signal_generator computes a 5m sweep+reclaim trigger and a
+    # 1h/4h higher-timeframe bias confirmation, and adds a +5 / -5 bonus to
+    # the confidence score depending on alignment. When `LTF_ENTRY_REQUIRED`
+    # is true, signals are dropped if the trigger has not fired or HTF bias
+    # disagrees, regardless of rule-based confidence.
+    LTF_ENTRY_REQUIRED: bool = False
+    LTF_TRIGGER_TIMEFRAME: str = "5m"
+    LTF_TRIGGER_LOOKBACK: int = 24    # bars on the trigger TF to scan for sweep
+    LTF_TRIGGER_RECLAIM_BARS: int = 3  # close-back-above must happen within N bars
+
     TOP_50_COINS: List[str] = [
         "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
         "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "TRXUSDT",

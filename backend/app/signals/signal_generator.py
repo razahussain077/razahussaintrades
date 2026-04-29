@@ -23,6 +23,7 @@ from app.engines.orderflow_engine import (
 )
 from app.signals.confidence_scorer import confidence_scorer
 from app.signals.models import Signal
+from app.analysis.entry_trigger import evaluate_entry_refinement
 from app.risk.position_sizer import calculate_position_size
 from app.risk.leverage_calculator import calculate_safe_leverage
 from app.risk.anti_liquidation import get_liquidation_price
@@ -324,6 +325,41 @@ async def generate_signal(symbol: str) -> Optional[Signal]:
         )
         confidence_score = score_result.get("confidence_score", 0)
 
+        # Lower-timeframe entry refinement (PR5).
+        # Pull a short window of fast candles + 1h/4h for HTF bias and ask the
+        # entry_trigger module whether (a) we have a sweep+reclaim pattern
+        # firing in the direction we want, and (b) the higher timeframe bias
+        # actually agrees. Bonus is +5 / 0 / -5 depending on alignment, and
+        # signals can be hard-filtered when LTF_ENTRY_REQUIRED is set.
+        try:
+            trigger_candles = await aggregator.get_best_candles(
+                symbol, settings.LTF_TRIGGER_TIMEFRAME, settings.LTF_TRIGGER_LOOKBACK + 10,
+            )
+        except Exception:
+            trigger_candles = []
+        try:
+            candles_4h = await aggregator.get_best_candles(symbol, "4h", 60)
+        except Exception:
+            candles_4h = []
+        ltf_eval = evaluate_entry_refinement(
+            direction=signal_type,
+            trigger_candles=trigger_candles,
+            htf_candle_sets=[candles_1h, candles_4h],
+            lookback=settings.LTF_TRIGGER_LOOKBACK,
+            reclaim_bars=settings.LTF_TRIGGER_RECLAIM_BARS,
+        )
+        confidence_score += ltf_eval.get("bonus", 0)
+        confidence_score = max(0.0, min(100.0, confidence_score))
+
+        if settings.LTF_ENTRY_REQUIRED and not (
+            ltf_eval.get("triggered") and ltf_eval.get("htf_aligned")
+        ):
+            logger.debug(
+                "Signal for %s dropped — LTF_ENTRY_REQUIRED and refinement failed: %s",
+                symbol, ltf_eval.get("reason"),
+            )
+            return None
+
         if confidence_score < settings.MIN_CONFIDENCE_SCORE:
             logger.debug(f"Signal for {symbol} below threshold: {confidence_score:.1f}")
             return None
@@ -371,6 +407,8 @@ async def generate_signal(symbol: str) -> Optional[Signal]:
 
         # Reasoning
         reasoning = score_result.get("reasoning", [])
+        if ltf_eval.get("have_data"):
+            reasoning.append(f"LTF: {ltf_eval.get('reason', 'no detail')}")
         if whale_result.get("is_whale_active"):
             reasoning.append(f"Whale activity detected: score {whale_result.get('whale_score', 0):.0f}/100")
         if vol_result.get("is_overbought"):
