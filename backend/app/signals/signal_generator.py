@@ -16,6 +16,11 @@ from app.analysis.wyckoff_engine import wyckoff_engine
 from app.analysis.whale_tracker import whale_tracker
 from app.analysis.volatility_engine import volatility_engine, calculate_atr, calculate_atr_percentage
 from app.analysis.multi_timeframe import mtf_analyzer
+from app.engines.orderflow_engine import (
+    detect_cvd_divergence,
+    detect_large_prints,
+    get_cvd_snapshot,
+)
 from app.signals.confidence_scorer import confidence_scorer
 from app.signals.models import Signal
 from app.risk.position_sizer import calculate_position_size
@@ -291,9 +296,31 @@ async def generate_signal(symbol: str) -> Optional[Signal]:
         if signal_type is None:
             return None
 
+        # Real-time order-flow context. The aggTrade WebSocket fills these
+        # buffers; until it has data the snapshot reports have_data=False
+        # and contributes nothing to the score.
+        of_cvd = get_cvd_snapshot(symbol)
+        of_prints = detect_large_prints(symbol)
+        try:
+            candles_1m = await aggregator.get_best_candles(symbol, "1m", 60)
+        except Exception:
+            candles_1m = []
+        of_div = detect_cvd_divergence(symbol, candles_1m, lookback_bars=20) if candles_1m else {}
+        orderflow_result = {
+            "have_data": of_cvd.get("have_data", False),
+            "delta_1m_normalized": of_cvd.get("delta_1m_normalized", 0.0),
+            "cvd_5m": of_cvd.get("cvd_5m", 0.0),
+            "cvd_15m": of_cvd.get("cvd_15m", 0.0),
+            "large_buy_count": of_prints.get("large_buy_count", 0),
+            "large_sell_count": of_prints.get("large_sell_count", 0),
+            "bullish_divergence": of_div.get("bullish_divergence", False),
+            "bearish_divergence": of_div.get("bearish_divergence", False),
+        }
+
         # Score the signal
         score_result = confidence_scorer.score(
-            smc_result, ict_result, liquidity_result, wyckoff_result, mtf_result, signal_type
+            smc_result, ict_result, liquidity_result, wyckoff_result, mtf_result, signal_type,
+            orderflow_result=orderflow_result,
         )
         confidence_score = score_result.get("confidence_score", 0)
 

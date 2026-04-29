@@ -197,3 +197,64 @@ export async function fetchMarketRegime(symbol: string): Promise<Record<string, 
 export async function fetchLiquidationHeatmap(symbol: string): Promise<Record<string, unknown>> {
   return apiFetch(`/api/liquidation-heatmap/${encodeURIComponent(symbol)}`)
 }
+
+export interface OrderFlowSnapshot {
+  symbol: string
+  cvd: {
+    have_data: boolean
+    cvd_1m: number
+    cvd_5m: number
+    cvd_15m: number
+    cvd_1h: number
+    delta_1m_normalized: number
+    trades_recorded: number
+    last_price: number
+    last_trade_at: string | null
+  }
+  large_prints: {
+    have_data: boolean
+    large_buy_count: number
+    large_buy_volume: number
+    large_sell_count: number
+    large_sell_volume: number
+    threshold: number
+  }
+}
+
+export async function fetchOrderFlow(symbol: string): Promise<OrderFlowSnapshot> {
+  return apiFetch<OrderFlowSnapshot>(`/api/orderflow/${encodeURIComponent(symbol)}`)
+}
+
+export interface OrderFlowDivergence {
+  symbol: string
+  have_data: boolean
+  bullish_divergence: boolean
+  bearish_divergence: boolean
+  current_low?: number
+  prev_low?: number
+  current_high?: number
+  prev_high?: number
+}
+
+export async function fetchOrderFlowDivergence(
+  symbol: string,
+  lookbackBars = 20,
+): Promise<OrderFlowDivergence> {
+  return apiFetch<OrderFlowDivergence>(
+    `/api/orderflow/${encodeURIComponent(symbol)}/divergence?lookback_bars=${lookbackBars}`,
+  )
+}
+
+export interface StreamsHealth {
+  liquidation: { events_received: number; last_event_ts: number | null }
+  aggtrade: {
+    ticks_received: number
+    last_tick_ms: number | null
+    subscribed_symbols: string[]
+  }
+  symbols_with_orderflow_data: string[]
+}
+
+export async function fetchStreamsHealth(): Promise<StreamsHealth> {
+  return apiFetch<StreamsHealth>('/api/orderflow/streams/health')
+}

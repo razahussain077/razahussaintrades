@@ -12,6 +12,7 @@ import {
   formatMarketCap,
 } from '@/lib/utils'
 import { SignalCard } from '@/components/dashboard/SignalCard'
+import OrderFlowPanel from '@/components/orderflow/OrderFlowPanel'
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react'
 import Link from 'next/link'
 
@@ -171,15 +172,19 @@ export default function CoinDetailPage() {
         <TradingChart symbol={symbol} timeframe={timeframe} signal={signal ?? undefined} />
       </div>
 
-      {/* Active signal for this coin */}
-      {signal && (
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 mb-3">Active Signal</h2>
-          <div className="max-w-lg">
+      {/* Active signal + live order flow */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {signal && (
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 mb-3">Active Signal</h2>
             <SignalCard signal={signal} />
           </div>
+        )}
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 mb-3">Real-time Order Flow</h2>
+          <OrderFlowPanel symbol={symbol} />
         </div>
-      )}
+      </div>
     </div>
   )
 }
