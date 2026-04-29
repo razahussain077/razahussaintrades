@@ -10,9 +10,11 @@ from app.websocket_manager import manager
 from app.api.routes import router
 from app.api.websocket_routes import ws_router
 from app.api.phase3_routes import phase3_router
+from app.api.orderflow_routes import orderflow_router
 from app.exchanges.binance_client import binance_client
 from app.signals.signal_generator import signal_generator
 from app.database.models import save_signal
+from app.streams import stream_supervisor
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
@@ -51,6 +53,7 @@ app.add_middleware(
 app.include_router(router, prefix="/api", tags=["API"])
 app.include_router(ws_router, tags=["WebSocket"])
 app.include_router(phase3_router, prefix="/api", tags=["Phase 3"])
+app.include_router(orderflow_router, prefix="/api", tags=["Order Flow"])
 
 
 @app.on_event("startup")
@@ -72,6 +75,17 @@ async def startup_event():
     except Exception as e:
         logger.error(f"WS manager start failed: {e}")
 
+    # Start real-time order-flow streams (liquidations + aggTrade for CVD).
+    # These run as background asyncio tasks managed by `stream_supervisor`.
+    try:
+        # Subscribe aggTrade to a manageable subset — top 30 symbols by default.
+        # This stays well under Binance's combined-stream limits and avoids
+        # hammering CPU on slower hosts.
+        aggtrade_symbols = settings.TOP_50_COINS[:30]
+        await stream_supervisor.start(aggtrade_symbols)
+    except Exception as e:
+        logger.error(f"stream supervisor start failed: {e}")
+
     # Start background loops
     asyncio.create_task(_price_refresh_loop())
     asyncio.create_task(_signal_scan_loop())
@@ -85,6 +99,10 @@ async def startup_event():
 async def shutdown_event():
     """Clean up resources on shutdown."""
     logger.info("Shutting down...")
+    try:
+        await stream_supervisor.stop()
+    except Exception as e:
+        logger.warning(f"stream supervisor shutdown error: {e}")
     await manager.stop()
     await binance_client.close()
 

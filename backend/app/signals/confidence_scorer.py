@@ -11,6 +11,7 @@ def score_signal(
     wyckoff_result: Dict,
     mtf_result: Dict,
     signal_type: str,
+    orderflow_result: Optional[Dict] = None,
 ) -> Dict:
     """
     Score a trading signal 0-100 based on confluence of analysis engines.
@@ -20,6 +21,7 @@ def score_signal(
     Liquidity (sweep + reclaim):                        up to 20 points
     Wyckoff alignment:                                  up to 10 points
     Multi-timeframe agreement:                          up to 15 points
+    Order flow (CVD direction + divergence):           up to 10 points (bonus)
     """
     score = 0.0
     reasoning: List[str] = []
@@ -223,7 +225,47 @@ def score_signal(
     mtf_points = min(15, mtf_points)
     score += mtf_points
 
-    total_score = min(100, round(score, 1))
+    # =========================================================
+    # 6. Order Flow (CVD) - max 10 points (bonus when data available)
+    # =========================================================
+    of_points = 0.0
+    if orderflow_result and orderflow_result.get("have_data"):
+        delta_norm = orderflow_result.get("delta_1m_normalized", 0.0)
+        # Aggressive flow alignment: positive normalized delta for LONG, negative for SHORT.
+        if (is_long and delta_norm >= 0.2) or (not is_long and delta_norm <= -0.2):
+            of_points += 4
+            reasoning.append(
+                f"Order flow aligned ({'buy' if is_long else 'sell'}-side): "
+                f"delta_1m_norm = {delta_norm:.2f}"
+            )
+        elif (is_long and delta_norm <= -0.4) or (not is_long and delta_norm >= 0.4):
+            of_points -= 3  # actively against the trade
+            reasoning.append(
+                f"WARNING: order flow against entry (delta_1m_norm = {delta_norm:.2f})"
+            )
+
+        # CVD divergence bonus (absorption setup)
+        if is_long and orderflow_result.get("bullish_divergence"):
+            of_points += 6
+            reasoning.append("Bullish CVD divergence: price LL but CVD HL (absorption)")
+        elif (not is_long) and orderflow_result.get("bearish_divergence"):
+            of_points += 6
+            reasoning.append("Bearish CVD divergence: price HH but CVD LH (absorption)")
+
+        # Large prints in trade direction add small bonus.
+        large_buys = orderflow_result.get("large_buy_count", 0) or 0
+        large_sells = orderflow_result.get("large_sell_count", 0) or 0
+        if is_long and large_buys >= 3 and large_buys > large_sells:
+            of_points += 2
+            reasoning.append(f"{large_buys} large buy prints in last minute")
+        elif not is_long and large_sells >= 3 and large_sells > large_buys:
+            of_points += 2
+            reasoning.append(f"{large_sells} large sell prints in last minute")
+
+    of_points = max(-3, min(10, of_points))
+    score += of_points
+
+    total_score = min(100, max(0, round(score, 1)))
 
     return {
         "confidence_score": total_score,
@@ -232,6 +274,7 @@ def score_signal(
         "liquidity_points": round(liq_points, 1),
         "wyckoff_points": round(wyckoff_points, 1),
         "mtf_points": round(mtf_points, 1),
+        "orderflow_points": round(of_points, 1),
         "reasoning": reasoning,
         "passes_threshold": total_score >= 60,
     }
@@ -246,6 +289,7 @@ class ConfidenceScorer:
         wyckoff_result: Dict,
         mtf_result: Dict,
         signal_type: str,
+        orderflow_result: Optional[Dict] = None,
     ) -> Dict:
         try:
             return score_signal(
@@ -255,6 +299,7 @@ class ConfidenceScorer:
                 wyckoff_result,
                 mtf_result,
                 signal_type,
+                orderflow_result=orderflow_result,
             )
         except Exception as e:
             logger.error(f"ConfidenceScorer error: {e}")
