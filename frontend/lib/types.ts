@@ -190,9 +190,13 @@ export interface BacktestResult {
 }
 
 export interface EconomicEvent {
-  id: string
-  title: string
-  datetime: string
+  id?: string
+  // Backend returns `name`; older callers may rely on `title`.
+  name?: string
+  title?: string
+  datetime?: string
+  datetime_utc?: string
+  datetime_pkt?: string
   impact: 'LOW' | 'MEDIUM' | 'HIGH'
   currency: string
   description?: string
@@ -200,6 +204,9 @@ export interface EconomicEvent {
   previous?: string
   minutes_until?: number
   is_warning_active?: boolean
+  is_active_warning?: boolean
+  is_indicative?: boolean
+  source?: string
 }
 
 export interface SignalStats {

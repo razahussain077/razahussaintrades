@@ -358,11 +358,17 @@ async def get_upcoming_events(
     next_event = news_engine.get_next_event()
     active_warnings = news_engine.get_warnings()
 
+    status = news_engine.get_status()
     return {
         "events": events,
         "next_event": next_event,
         "active_warnings": active_warnings,
         "has_active_warnings": len(active_warnings) > 0,
+        # Tells the frontend whether the calendar is real or synthesized.
+        # `is_indicative=True` → render an "approximate" badge.
+        "source": status["source"],
+        "is_indicative": status["is_indicative"],
+        "fetched_at": status["fetched_at"],
     }
 
 
@@ -380,6 +386,17 @@ async def get_active_warnings():
         "signal_warning": signal_warning,
         "has_warnings": len(warnings) > 0,
     }
+
+
+@phase3_router.get(
+    "/events/calendar/status",
+    summary="Calendar provider liveness (real-vs-fallback diagnostic)",
+    tags=["Phase 3 - Events"],
+)
+async def get_calendar_status():
+    """Returns whether the live ForexFactory mirror is reachable, when the
+    last successful fetch was, and how many events are currently cached."""
+    return news_engine.get_status()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
